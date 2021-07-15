@@ -249,6 +249,7 @@ Asus;Asus ZenFone Zoom ZX551ML;4.7;devicespecifications
 Asus;Asus ZenPad S 8.0 Z580CA;3.6;devicespecifications
 Asus;Asus ZenPad S 8.0 Z580CA 16GB;3.6;devicespecifications
 Asus;ASUS_I001DC;12.7;devicespecifications
+ASUS;ASUS_I006D;7.53;devicespecifications
 Asus;ASUS_Z00ED;4.69;devicespecifications
 Axgio;Axgio N3;4.69;devicespecifications
 BenQ;BenQ AC100;6.16;digicamdb
@@ -378,6 +379,8 @@ Blackberry;Blackberry Priv;0.28;devicespecifications
 Blackberry;Blackberry Q10;4.8;devicespecifications
 Blackberry;Blackberry Q5;4.8;devicespecifications
 Blackmagic;Blackmagic Studio Camera HD;12.48;usercontribution
+Blackmagic;Blackmagic Pocket Cinema Camera 4K;18.96;usercontribution
+Blackmagic;Blackmagic Pocket Cinema Camera 6K;23.10;usercontribution
 Blackview;Blackview A10;2.8;devicespecifications
 Blackview;Blackview A20 Pro;3.67;devicespecifications
 Blackview;Blackview A30;3.67;devicespecifications
@@ -1369,6 +1372,7 @@ DJI;FC300X;6.16;usercontribution
 DJI;FC300X;6.16;usercontribution
 DJI;FC300XW;6.17;usercontribution
 DJI;FC330;6.17;usercontribution
+DJI;FC3411;13.13;usercontribution
 DJI;FC350;6.17;usercontribution
 DJI;FC350;6.17;usercontribution
 DJI;FC550;17.3;usercontribution
@@ -1380,6 +1384,7 @@ DJI;FC6510;13.2;usercontribution
 DJI;FC6520;17.3;usercontribution
 DJI;FC6540;23.5;usercontribution
 DJI;FC7203;6.16;usercontribution
+DJI;FC7303;6.16;usercontribution
 DJI;Phantom 4;6.3;dxomark
 DJI;Phantom 4 Pro;13.2;dxomark
 DJI;Phantom Vision FC200;6.17;usercontribution
@@ -2049,6 +2054,8 @@ Google;Pixel 2 XL;5.5;devicespecifications
 Google;Pixel 3 XL;5.76;techradar
 Google;Pixel 3a;5.76;devicespecifications
 Google;Pixel 4 XL;5.98;usercontribution
+Google;Pixel 4a (5G);5.56;usercontribution
+Google;Pixel 5;5.56;usercontribution
 GoPro;GoPro Fusion;6.17;dpreview
 GoPro;GoPro Hero 2018;6.17;dpreview
 GoPro;GoPro Hero3-Silver Edition;5.37;usercontribution
@@ -3262,6 +3269,7 @@ Motorola;Motorola 3rd Gen;4.69;devicespecifications
 Motorola;Motorola 4;6.06;usercontribution
 Motorola;Motorola Droid Maxx 2;5.99;devicespecifications
 Motorola;Motorola Droid Turbo 2;5.99;devicespecifications
+Motorola;Motorola One Fusion;6.4;usercontribution
 Motorola;Motorola Moto G;4.69;devicespecifications
 Motorola;Motorola Moto G4;3.67;devicespecifications
 Motorola;Motorola Moto G4 Plus;6.06;devicespecifications
@@ -5660,6 +5668,7 @@ Samsung;SM-J111M;3.6;usercontribution
 Samsung;SM-N9005;4.69;usercontribution
 Samsung;SM-N960F;5.65;usercontribution
 Samsung;SM-N975F;5.64;usercontribution
+Samsung;SM-N975U;5.72;usercontribution
 Santin;Santin Max 4 Pro;4.74;devicespecifications
 Santin;Santin N1;4.71;devicespecifications
 Santin;Santin N1 Max;4.75;devicespecifications
@@ -5821,6 +5830,7 @@ Sony;ILCA-77M2;23.5;usercontribution
 Sony;ILCE-5000;23.2;usercontribution
 Sony;ILCE-5100;23.5;usercontribution
 Sony;ILCE-6000;23.5;usercontribution
+Sony;ILCE-6100;23.5;usercontribution,dpreview
 Sony;ILCE-6300;23.5;usercontribution
 Sony;ILCE-6400;23.5;usercontribution
 Sony;ILCE-6500;23.5;usercontribution
@@ -6873,7 +6883,9 @@ Winnovo;Winnovo K56;2.65;devicespecifications
 Wolder;Wolder Wiam #65;5.99;devicespecifications
 Xgody;Xgody Y20;3.68;devicespecifications
 Xiaomi;POCOPHONE F1;5.64;deviceranks
+Xiaomi;m2007j20cg;7.4;devicespecifications
 Xiaomi;Mi A1;5.11;devicespecifications
+Xiaomi;Mi A3;6.4;devicespecifications
 Xiaomi;Xiaomi Mi 3;4.69;devicespecifications
 Xiaomi;Xiaomi Mi 3 TD;4.69;devicespecifications
 Xiaomi;Xiaomi Mi 4;4.69;devicespecifications
