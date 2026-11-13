@@ -6,8 +6,14 @@ The project is released under [MPLv2](LICENSE-MPL2.md).
 Individuals
 -----------
 
+- Abdelrahman Al Marouk
+- Alice Sonolet
+- balloonalpha
+- Candice Bentejac
 - Carsten Griwodz
+- Cedric Thebault
 - Cenek Albl
+- c-ewing
 - Clement Aymard
 - Clement Debize
 - Cyril Pichard
@@ -16,15 +22,22 @@ Individuals
 - Fabien Servant
 - Gregoire De Lillo
 - Havard Espeland
+- JackBoosY
 - Jean Melou
 - Julien Haudegond
 - Lilian Calvet
+- Loic Vital
+- luzpaz
 - Michal Polic
+- Matthieu Hog
 - Nicolas Rondaud
 - Pierre Gurdjos
+- Povilas Kanapickas
 - Simone Gasparini
+- Sylvain Maziere
 - Théo Leplomb
 - Tomas Pajdla
+- Vincent Demoulin
 - Yann Lanthony
 - Zeljko Vrba
 

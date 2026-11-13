@@ -6,23 +6,19 @@
 
 #pragma once
 
+#include <aliceVision/image/Image.hpp>
 #include <aliceVision/mvsUtils/MultiViewParams.hpp>
 #include <aliceVision/mvsData/Point3d.hpp>
 #include <aliceVision/mvsData/StaticVector.hpp>
-#include <aliceVision/mvsData/Universe.hpp>
-#include <aliceVision/mvsData/Voxel.hpp>
+#include <aliceVision/sfmData/SfMData.hpp>
 
 namespace aliceVision {
-
-namespace sfmData {
-class SfMData;
-}
 
 namespace fuseCut {
 
 class Fuser
 {
-public:
+  public:
     const mvsUtils::MultiViewParams& _mp;
 
     Fuser(const mvsUtils::MultiViewParams& mp);
@@ -42,18 +38,22 @@ public:
     float computeAveragePixelSizeInHexahedron(Point3d* hexah, int step, int scale);
     float computeAveragePixelSizeInHexahedron(Point3d* hexah, const sfmData::SfMData& sfmData);
 
-    Voxel estimateDimensions(Point3d* vox, Point3d* newSpace, int scale, int maxOcTreeDim, const sfmData::SfMData* sfmData = nullptr);
-
-private:
-    bool updateInSurr(float pixToleranceFactor, int pixSizeBall, int pixSizeBallWSP, Point3d& p, int rc, int tc, StaticVector<int>* numOfPtsMap,
-                      StaticVector<float>* depthMap, StaticVector<float>* simMap, int scale);
+  private:
+    bool updateInSurr(float pixToleranceFactor,
+                      int pixSizeBall,
+                      int pixSizeBallWSP,
+                      Point3d& p,
+                      int rc,
+                      int tc,
+                      StaticVector<int>* numOfPtsMap,
+                      const image::Image<float>& depthMap,
+                      const image::Image<float>& simMap,
+                      int scale);
 };
 
 unsigned long computeNumberOfAllPoints(const mvsUtils::MultiViewParams& mp, int scale);
 
-std::string generateTempPtsSimsFiles(std::string tmpDir, mvsUtils::MultiViewParams& mp, bool addRandomNoise = false,
-                                     float percNoisePts = 0.0, int noisPixSizeDistHalfThr = 0);
-void deleteTempPtsSimsFiles(mvsUtils::MultiViewParams& mp, std::string depthMapsPtsSimsTmpDir);
 
-} // namespace fuseCut
-} // namespace aliceVision
+
+}  // namespace fuseCut
+}  // namespace aliceVision

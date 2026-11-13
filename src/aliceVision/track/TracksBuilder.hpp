@@ -7,9 +7,9 @@
 #pragma once
 
 #include <aliceVision/track/Track.hpp>
+#include <aliceVision/feature/FeaturesPerView.hpp>
 
 #include <memory>
-
 
 namespace aliceVision {
 namespace track {
@@ -44,46 +44,59 @@ struct TracksBuilderData;
  */
 class TracksBuilder
 {
-public:
+  public:
     TracksBuilder();
     ~TracksBuilder();
 
     /**
-    * @brief Build tracks for a given series of pairWise matches
-    * @param[in] pairwiseMatches PairWise matches
-    */
-    void build(const PairwiseMatches& pairwiseMatches);
+     * @brief Build tracks for a given series of pairWise matches
+     * @param[in] pairwiseMatches PairWise matches
+     * @param[in] featuresPerView all features (used for matching) in pairwiseMatches
+     */
+    void build(const matching::PairwiseMatches& pairwiseMatches);
 
     /**
-    * @brief Remove bad tracks (too short or track with ids collision)
-    * @param[in] clearForks: remove tracks with multiple observation in a single image
-    * @param[in] minTrackLength: minimal number of observations to keep the track
-    * @param[in] multithreaded Is multithreaded
-    */
+     * @brief Remove bad tracks (too short or track with ids collision)
+     * @param[in] clearForks: remove tracks with multiple observation in a single image
+     * @param[in] minTrackLength: minimal number of observations to keep the track
+     * @param[in] multithreaded Is multithreaded
+     */
     void filter(bool clearForks = true, std::size_t minTrackLength = 2, bool multithreaded = true);
 
     /**
-    * @brief Export data of tracks to stream
-    * @param[out] os char output stream
-    * @return true if no error flag are set
-    */
+     * @brief Export data of tracks to stream
+     * @param[out] os char output stream
+     * @return true if no error flag are set
+     */
     bool exportToStream(std::ostream& os);
 
     /**
-    * @brief Export tracks as a map (each entry is a sequence of imageId and keypointId):
-    *        {TrackIndex => {(imageIndex, keypointId), ... ,(imageIndex, keypointId)}
-    */
-    void exportToSTL(TracksMap& allTracks) const;
+     * @brief Export tracks as a map (each entry is a sequence of imageId and keypointId):
+     *        {TrackIndex => {(imageIndex, keypointId), ... ,(imageIndex, keypointId)}
+     * @param allTracks output to tracks
+     * @param featuresPerView is the feature per view map for accessing features information.
+     * If nullptr, then no coordinates or scale will be saved (For legacy purpose)
+     */
+    void exportToSTL(TracksMap& allTracks, const feature::FeaturesPerView* featuresPerView = nullptr) const;
 
     /**
-    * @brief Return the number of connected set in the UnionFind structure (tree forest)
-    * @return number of connected set in the UnionFind structure
-    */
+     * @brief Return the number of connected set in the UnionFind structure (tree forest)
+     * @return number of connected set in the UnionFind structure
+     */
     std::size_t nbTracks() const;
 
-private:
+    /**
+     * @brief Return the number of tracks removed by the last call to filter() which did not return early
+     * @return number of removed tracks (0 if filter() was never called)
+     */
+    std::size_t getFilteredCount() const { return _filteredCounter; }
+
+    void displayStats(const TracksMap & allTracks) const;
+
+  private:
     std::unique_ptr<TracksBuilderData> _d;
+    size_t _filteredCounter = 0;
 };
 
-} // namespace track
-} // namespace aliceVision
+}  // namespace track
+}  // namespace aliceVision

@@ -63,6 +63,12 @@ This program is based on works distributed under the terms of another license(s)
     Distributed under the [MPL2 license](http://opensource.org/licenses/MPL-2.0).  
     Compiled with EIGEN_MPL2_ONLY to ensure MPL2 compatible code.
 
+*   __Expat__  
+    https://libexpat.github.io/
+    Copyright (c) 1998-2000 Thai Open Source Software Center Ltd and Clark Cooper
+    Copyright (c) 2001-2022 Expat maintainers
+    Distributed under the MIT/X Consortium license
+
 *   __Flann__  
     [https://www.cs.ubc.ca/research/flann](https://www.cs.ubc.ca/research/flann)  
     Copyright (c) 2008-2011  Marius Muja (mariusm@cs.ubc.ca). All rights reserved.  
@@ -86,6 +92,11 @@ This program is based on works distributed under the terms of another license(s)
     [http://lemon.cs.elte.hu/trac/lemon](http://lemon.cs.elte.hu/trac/lemon)  
     Copyright (c) Lemon authors.  
     Distributed under the [Boost License 1.0](http://www.boost.org/LICENSE_1_0.txt).
+
+*   __libE57Format__  
+    [https://github.com/asmaloney/libE57Format](https://github.com/asmaloney/libE57Format)  
+    Copyright (c) libE57Format authors.  
+    Distributed under the [BSL-1.0 license](https://opensource.org/licenses/BSL-1.0).   
 
 *   __MeshSDFilter__  
     [https://github.com/bldeng/MeshSDFilter](https://github.com/bldeng/MeshSDFilter)  
@@ -112,11 +123,6 @@ This program is based on works distributed under the terms of another license(s)
 *   __OpenEXR__ (required by OpenImageIO and used in the pipeline)  
     [http://www.openexr.com](http://www.openexr.com)  
     Copyright (c) 2002, Industrial Light & Magic, a division of Lucas Digital Ltd. LLC  
-    Distributed under the [BSD-3-Clause](https://opensource.org/licenses/BSD-3-Clause)
-
-*   __OpenGV__ (optional)  
-    [https://laurentkneip.github.io/opengv](https://laurentkneip.github.io/opengv)  
-    Copyright (c) 2013 Laurent Kneip, The Australian National University ANU. All rights reserved  
     Distributed under the [BSD-3-Clause](https://opensource.org/licenses/BSD-3-Clause)
 
 *   __OpenImageIO__  

@@ -1,465 +1,255 @@
 // This file is part of the AliceVision project.
-// Copyright (c) 2021 AliceVision contributors.
+// Copyright (c) 2022 AliceVision contributors.
 // This Source Code Form is subject to the terms of the Mozilla Public License,
 // v. 2.0. If a copy of the MPL was not distributed with this file,
 // You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#include <Eigen/Dense>
+// This application tries to estimate the distortion of a set of images.
+// It is assumed that for each image we have a result of the checkerboard detector.
 
-#include <boost/program_options.hpp>
-#include <boost/filesystem.hpp>
-#include <sstream>
+// The constraint for this calibration is that we may not know :
+// - the checkerboard size
+// - the squares sizes
+// - the checkerboard relative poses
 
-#include <aliceVision/system/cmdline.hpp>
+// We may only have only one image per distortion to estimate.
+
+// The idea is is to calibrate distortion parameters without estimating the pose or the intrinsics.
+// This algorithms groups the corners by lines and minimize a distance between corners and lines using distortion.
+
+#include <aliceVision/cmdline/cmdline.hpp>
 #include <aliceVision/system/Logger.hpp>
 #include <aliceVision/system/main.hpp>
-#include <aliceVision/system/Timer.hpp>
 
 #include <aliceVision/sfmData/SfMData.hpp>
 #include <aliceVision/sfmDataIO/sfmDataIO.hpp>
 
-#include <aliceVision/image/all.hpp>
-#include <OpenImageIO/imagebufalgo.h>
-
-
-#include <aliceVision/calibration/distortionEstimation.hpp>
 #include <aliceVision/calibration/checkerDetector.hpp>
+#include <aliceVision/calibration/checkerDetector_io.hpp>
+#include <aliceVision/calibration/distortionEstimationLine.hpp>
+#include <aliceVision/calibration/distortionEstimationGeometry.hpp>
 
-#include <chrono>
-#include <vector>
+#include <aliceVision/camera/Undistortion3DEA4.hpp>
 
+#include <boost/program_options.hpp>
+#include <boost/property_tree/json_parser.hpp>
+#include <boost/math/constants/constants.hpp>
 
+#include <fstream>
 
 // These constants define the current software version.
 // They must be updated when the command line is changed.
-#define ALICEVISION_SOFTWARE_VERSION_MAJOR 0
-#define ALICEVISION_SOFTWARE_VERSION_MINOR 1
+#define ALICEVISION_SOFTWARE_VERSION_MAJOR 6
+#define ALICEVISION_SOFTWARE_VERSION_MINOR 0
 
 namespace po = boost::program_options;
-namespace fs = boost::filesystem;
-
 using namespace aliceVision;
 
-
-image::Image<image::RGBColor> undistort(Vec2 & offset, const std::shared_ptr<camera::Pinhole> & camera, const image::Image<image::RGBColor> & source) 
+void processPerspective(const std::map<IndexT, calibration::CheckerDetector> & boardsAllImages,        
+                        std::shared_ptr<camera::Undistortion> & undistortion,  
+                        calibration::Statistics & statistics)
 {
-    const double w = source.Width();
-    const double h = source.Height();
+    std::vector<bool> sharedParameters(undistortion->getParameters().size(), true);
+    //Shared squeeze X
+    sharedParameters[11] = false;
+    calibration::DistortionEstimationGeometry estimator(sharedParameters);
 
-    double minx = w;
-    double maxx = 0;
-    double miny = h;
-    double maxy = 0;
-
-    for (int i = 0; i < h; i++) 
+    for (const auto & pdetector : boardsAllImages)
     {
-        for (int j = 0; j < w; j++)
+        const calibration::CheckerDetector & detector = pdetector.second; 
+        const std::vector<calibration::CheckerDetector::CheckerBoardCorner>& corners = detector.getCorners();
+        const std::vector<calibration::CheckerDetector::CheckerBoard>& boards = detector.getBoards();
+
+        if (boards.size() == 0) 
         {
-            Vec2 pos = camera->get_ud_pixel(Vec2(j, i));
-            minx = std::min(minx, pos.x());
-            maxx = std::max(maxx, pos.x());
-            miny = std::min(miny, pos.y());
-            maxy = std::max(maxy, pos.y());
+            return;
         }
-    }
 
-    const int width = maxx - minx + 1;
-    const int height = maxy - miny + 1;
-
-    image::Image<image::RGBColor> result(width, height, true, image::RGBColor(0, 0, 0));
-
-    const image::Sampler2d<image::SamplerLinear> sampler;
-
-    for (int i = 0; i < height; i++) 
-    {
-        const double y = miny + double(i);
-
-        for (int j = 0; j < width; j++)
+        int maxSurface = 0;
+        int idBestBoard = 0;
+        for (int idboard = 0; idboard < boards.size(); idboard++)
         {
-            const double x = minx + double(j);
-
-            const Vec2 pos(x, y);
-            const Vec2 dist = camera->get_d_pixel(pos);
-
-            if (dist.x() < 0 || dist.x() >= source.Width()) continue;
-            if (dist.y() < 0 || dist.y() >= source.Height()) continue;
-            
-            const image::RGBColor c = sampler(source, dist.y(), dist.x());
-            
-            result(i, j) = c;
-        }
-    }
-
-    offset.x() = minx;
-    offset.y() = miny;
-
-    return result;
-}
-
-image::Image<image::RGBfColor> undistortSTMAP(Vec2 & offset, const std::shared_ptr<camera::Pinhole> & camera, const image::Image<image::RGBColor> & source) 
-{
-    const double w = source.Width();
-    const double h = source.Height();
-
-    double minx = w;
-    double maxx = 0;
-    double miny = h;
-    double maxy = 0;
-
-    for (int i = 0; i < h; i++) 
-    {
-        for (int j = 0; j < w; j++)
-        {
-            const Vec2 pos = camera->get_ud_pixel(Vec2(j, i));
-            minx = std::min(minx, pos.x());
-            maxx = std::max(maxx, pos.x());
-            miny = std::min(miny, pos.y());
-            maxy = std::max(maxy, pos.y());
-        }
-    }
-
-    const int width = maxx - minx + 1;
-    const int height = maxy - miny + 1;
-
-    image::Image<image::RGBfColor> result(width, height, true, image::FBLACK);
-
-    const image::Sampler2d<image::SamplerLinear> sampler;
-
-    for (int i = 0; i < height; i++) 
-    {
-        const double y = miny + double(i);
-
-        for (int j = 0; j < width; j++)
-        {
-            const double x = minx + double(j);
-
-            const Vec2 pos(x, y);
-            const Vec2 dist = camera->get_d_pixel(pos);
-
-            if (dist.x() < 0 || dist.x() >= source.Width()) continue;
-            if (dist.y() < 0 || dist.y() >= source.Height()) continue;
-
-            result(i, j).r() = dist.x() / (float(w) - 1);
-            result(i, j).g() = 1.0 - (dist.y() / (float(h) - 1.0f));
-            result(i, j).b() = 0.0f;
-        }
-    }
-
-    offset.x() = minx;
-    offset.y() = miny;
-
-    return result;
-}
-
-bool retrieveLines(std::vector<calibration::LineWithPoints> & lineWithPoints, const image::Image<image::RGBColor> & input, const std::string & checkerImagePath)
-{
-    calibration::CheckerDetector detect;
-    if (!detect.process(input))
-    {
-        return false;
-    }
-
-    if(!checkerImagePath.empty())
-    {
-        image::Image<image::RGBColor> drawing = input;
-        detect.drawCheckerBoard(drawing);
-        image::writeImage(checkerImagePath, drawing, image::EImageColorSpace::NO_CONVERSION);
-    }
-
-    lineWithPoints.clear();
-
-    std::vector<calibration::CheckerDetector::CheckerBoardCorner> corners = detect.getCorners();
-    for (auto & b : detect.getBoards())
-    {
-        // Create horizontal lines
-        for (int i = 0; i < b.rows(); i ++)
-        {
-            //Random init
-            calibration::LineWithPoints line;
-            line.angle = M_PI_4;
-            line.dist = 1;
-            line.horizontal = true;
-            line.index = i;
-
-            for (int j = 0; j < b.cols(); j++)
+            int surface = boards[idboard].rows() * boards[idboard].cols();
+            if (surface > maxSurface)
             {
-                const IndexT idx = b(i, j);
-                if (idx == UndefinedIndexT) continue;
-
-                const calibration::CheckerDetector::CheckerBoardCorner& p = corners[idx];
-                line.points.push_back(p.center);
+                maxSurface = surface;
+                idBestBoard = idboard;
             }
-
-            //Check we don't have a too small line which won't be easy to estimate
-            if (line.points.size() < 10) continue;
-            lineWithPoints.push_back(line);
         }
+        const auto & board = boards[idBestBoard];
 
-        // Create vertical lines
-        for (int j = 0; j < b.cols(); j++)
+        std::vector<calibration::PointPair> pointPairs;
+
+        Eigen::Vector2d centerBoard;
+        centerBoard.x() = double(board.cols()) * 0.5;
+        centerBoard.y() = double(board.rows()) * 0.5;
+
+        double board_scale = double(std::max(board.cols(), board.rows()));
+
+
+        for (int i = 0; i < board.rows(); i++)
         {
-            calibration::LineWithPoints line;
-            line.angle = M_PI_4;
-            line.dist = 1;
-            line.horizontal = false;
-            line.index = j;
-
-            for (int i = 0; i < b.rows(); i++)
+            for (int j = 0; j < board.cols(); j++)
             {
-                const IndexT idx = b(i, j);
-                if (idx == UndefinedIndexT) continue;
+                IndexT idx = board(i, j);
+                if (idx == UndefinedIndexT)
+                {
+                    continue;
+                }
 
-                const calibration::CheckerDetector::CheckerBoardCorner& p = corners[idx];
-                line.points.push_back(p.center);
+                Vec2 pt = corners[idx].center;
+
+                calibration::PointPair pp;           
+                pp.undistortedPoint.x() = (double(j) - centerBoard.x()) / board_scale;
+                pp.undistortedPoint.y() = (double(i) - centerBoard.y()) / board_scale;
+                pp.distortedPoint.x() = pt.x();
+                pp.distortedPoint.y() = pt.y();
+                pp.scale = corners[idx].scale;
+
+                pointPairs.push_back(pp);
             }
-
-            //Check we don't have a too small line which won't be easy to estimate
-            if (line.points.size() < 10) continue;
-
-            lineWithPoints.push_back(line);
         }
+
+        estimator.addView(undistortion, pointPairs);
     }
 
-    if (lineWithPoints.size() < 2)
-    {
-        return false;
-    }
+    std::vector<bool> locksStep1 = {true, true, true, true, true, true, true, true, true, true, false, false, true};
+    std::vector<bool> locksStep2 = {false, false, false, false, false, false, false, false, false, false, false, false, true};
 
-    return true;
+    estimator.compute(statistics, true, locksStep1);
+
+    ALICEVISION_LOG_INFO("Result quality of calibration: ");
+    ALICEVISION_LOG_INFO("Mean of error (stddev): " << statistics.mean << "(" << statistics.stddev << ")");
+    ALICEVISION_LOG_INFO("Median of error: " << statistics.median);
+    ALICEVISION_LOG_INFO("Last decile of error: " << statistics.lastDecile);
+    ALICEVISION_LOG_INFO("Max of error: " << statistics.max);
+
+    estimator.compute(statistics, true, locksStep2);
+
+    ALICEVISION_LOG_INFO("Result quality of calibration: ");
+    ALICEVISION_LOG_INFO("Mean of error (stddev): " << statistics.mean << "(" << statistics.stddev << ")");
+    ALICEVISION_LOG_INFO("Median of error: " << statistics.median);
+    ALICEVISION_LOG_INFO("Last decile of error: " << statistics.lastDecile);
+    ALICEVISION_LOG_INFO("Max of error: " << statistics.max);
 }
 
-template <class T>
-bool estimateDistortionK1(std::shared_ptr<camera::Pinhole> & camera, calibration::Statistics & statistics, std::vector<T> & items)
+// Utility lambda to create lines by iterating over a board's cells in a given order
+std::vector<calibration::LineWithPoints> createLines(
+                const std::vector<calibration::CheckerDetector::CheckerBoardCorner> & corners,
+                const calibration::CheckerDetector::CheckerBoard& board,
+                bool exploreByRow,
+                bool replaceRowWithSum,
+                bool replaceColWithSum,
+                bool flipRow,
+                bool flipCol)
 {
-    std::vector<bool> locksDistortions = {true};
+    std::vector<calibration::LineWithPoints> lines;
 
-    //Everything locked except lines parameters
-    locksDistortions[0] = true;
-    if (!calibration::estimate(camera, statistics, items, true, true, locksDistortions))
+    const std::size_t minPointsPerLine = 5;
+
+    int dim1 = exploreByRow ? board.rows() : board.cols();
+    int dim2 = exploreByRow ? board.cols() : board.rows();
+
+    for (int i = 0; i < dim1; ++i)
     {
-        ALICEVISION_LOG_ERROR("Failed to calibrate");
-        return false;
-    }
+        // Random init
+        calibration::LineWithPoints line;
+        line.dist = i;
+        line.angle = M_PI_4;
 
-    //Relax distortion 1st order
-    locksDistortions[0] = false;
-    if (!calibration::estimate(camera, statistics, items, true, true, locksDistortions))
-    {
-        ALICEVISION_LOG_ERROR("Failed to calibrate");
-        return false;
-    }
-
-    //Relax offcenter
-    locksDistortions[0] = false;
-    if (!calibration::estimate(camera, statistics, items, true, false, locksDistortions))
-    {
-        ALICEVISION_LOG_ERROR("Failed to calibrate");
-        return false;
-    }
-
-    return true;
-}
-
-template <class T>
-bool estimateDistortionK3(std::shared_ptr<camera::Pinhole> & camera, calibration::Statistics & statistics, std::vector<T> & items)
-{
-    std::vector<bool> locksDistortions = {true, true, true};
-
-    //Everything locked except lines parameters
-    locksDistortions[0] = true;
-    if (!calibration::estimate(camera, statistics, items, true, true, locksDistortions))
-    {
-        ALICEVISION_LOG_ERROR("Failed to calibrate");
-        return false;
-    }
-
-    //Relax distortion 1st order
-    locksDistortions[0] = false;
-    if (!calibration::estimate(camera, statistics, items, true, true, locksDistortions))
-    {
-        ALICEVISION_LOG_ERROR("Failed to calibrate");
-        return false;
-    }
-
-    //Relax offcenter
-    locksDistortions[0] = false;
-    if (!calibration::estimate(camera, statistics, items, true, false, locksDistortions))
-    {
-        ALICEVISION_LOG_ERROR("Failed to calibrate");
-        return false;
-    }
-
-    //Relax offcenter
-    locksDistortions[0] = false;
-    locksDistortions[1] = false;
-    locksDistortions[2] = false;
-    if (!calibration::estimate(camera, statistics, items, true, false, locksDistortions))
-    {
-        ALICEVISION_LOG_ERROR("Failed to calibrate");
-        return false;
-    }
-
-    return true;
-}
-
-template <class T>
-bool estimateDistortion3DER4(std::shared_ptr<camera::Pinhole> & camera, calibration::Statistics & statistics, std::vector<T> & items)
-{
-    std::vector<bool> locksDistortions = {true, true, true, true, true, true};
-
-    //Everything locked except lines parameters
-    locksDistortions[0] = true;
-    if (!calibration::estimate(camera, statistics, items, true, true, locksDistortions))
-    {
-        ALICEVISION_LOG_ERROR("Failed to calibrate");
-        return false;
-    }
-
-    //Relax distortion 1st order
-    locksDistortions[0] = false;
-    if (!calibration::estimate(camera, statistics, items, true, true, locksDistortions))
-    {
-        ALICEVISION_LOG_ERROR("Failed to calibrate");
-        return false;
-    }
-
-    //Relax offcenter
-    locksDistortions[0] = false;
-    if (!calibration::estimate(camera, statistics, items, true, false, locksDistortions))
-    {
-        ALICEVISION_LOG_ERROR("Failed to calibrate");
-        return false;
-    }
-
-    //Relax offcenter
-    locksDistortions[0] = false;
-    locksDistortions[1] = false;
-    locksDistortions[2] = false;
-    locksDistortions[3] = false;
-    locksDistortions[4] = false;
-    locksDistortions[5] = false;
-    if (!calibration::estimate(camera, statistics, items, true, false, locksDistortions))
-    {
-        ALICEVISION_LOG_ERROR("Failed to calibrate");
-        return false;
-    }
-
-    return true;
-}
-
-template <class T>
-bool estimateDistortion3DEA4(std::shared_ptr<camera::Pinhole> & camera, calibration::Statistics & statistics, std::vector<T> & items)
-{
-    std::shared_ptr<camera::Pinhole> simpleCamera = std::make_shared<camera::PinholeRadialK1>(camera->w(), camera->h(), camera->getScale()[0], camera->getScale()[1], camera->getOffset()[0], camera->getOffset()[1], 0.0);
-    if (!estimateDistortionK1(simpleCamera, statistics, items))
-    {
-        return false;
-    }
-
-    std::vector<bool> locksDistortions = {true, true, true, true};
-
-    //Relax distortion all orders
-    locksDistortions[0] = false;
-    locksDistortions[1] = false;
-    locksDistortions[2] = false;
-    locksDistortions[3] = false;
-
-    const double k1 = simpleCamera->getDistortionParams()[0];
-    camera->setDistortionParams({k1,k1,k1,k1});
-
-    if (!calibration::estimate(camera, statistics, items, true, false, locksDistortions))
-    {
-        ALICEVISION_LOG_ERROR("Failed to calibrate");
-        return false;
-    }
-
-    return true;
-}
-
-template <class T>
-bool estimateDistortion3DELD(std::shared_ptr<camera::Pinhole> & camera, calibration::Statistics & statistics, std::vector<T> & items)
-{
-    std::vector<double> params = camera->getDistortionParams();
-    params[0] = 0.0;
-    params[1] = M_PI_2;
-    params[2] = 0.0;
-    params[3] = 0.0;
-    params[4] = 0.0;
-    camera->setDistortionParams(params);
-
-    std::vector<bool> locksDistortions = {true, true, true, true, true};
-
-    //Everything locked except lines parameters
-    locksDistortions[0] = true;
-    if (!calibration::estimate(camera, statistics, items, true, true, locksDistortions))
-    {
-        ALICEVISION_LOG_ERROR("Failed to calibrate");
-        return false;
-    }
-
-    //Relax distortion 1st order
-    locksDistortions[0] = false;
-    if (!calibration::estimate(camera, statistics, items, true, true, locksDistortions))
-    {
-        ALICEVISION_LOG_ERROR("Failed to calibrate");
-        return false;
-    }
-
-    //Relax offcenter
-    locksDistortions[0] = false;
-    if (!calibration::estimate(camera, statistics, items, true, false, locksDistortions))
-    {
-        ALICEVISION_LOG_ERROR("Failed to calibrate");
-        return false;
-    }
-
-    //Relax offcenter
-    locksDistortions[0] = false;
-    locksDistortions[1] = true;
-    locksDistortions[2] = false;
-    locksDistortions[3] = false;
-    locksDistortions[4] = true;
-    if (!calibration::estimate(camera, statistics, items, true, false, locksDistortions))
-    {
-        ALICEVISION_LOG_ERROR("Failed to calibrate");
-        return false;
-    }
-
-    //Relax offcenter
-    locksDistortions[0] = false;
-    locksDistortions[1] = false;
-    locksDistortions[2] = false;
-    locksDistortions[3] = false;
-    locksDistortions[4] = false;
-    if (!calibration::estimate(camera, statistics, items, true, false, locksDistortions))
-    {
-        ALICEVISION_LOG_ERROR("Failed to calibrate");
-        return false;
-    }
-
-    return true;
-}
-
-bool generatePoints(std::vector<calibration::PointPair> & points, const std::shared_ptr<camera::Pinhole> & camera, const std::vector<calibration::LineWithPoints> & lineWithPoints)
-{
-    for (auto & l : lineWithPoints)
-    {
-        for (auto & pt : l.points)
+        for (int j = 0; j < dim2; ++j)
         {
-            calibration::PointPair pp;
+            int i_cell = replaceRowWithSum ? i + j : (exploreByRow ? i : j);
+            i_cell = flipRow ? board.rows() - 1 - i_cell : i_cell;
 
-            //Everything is reverted in the given model (distorting equals to undistorting)
-            pp.undistortedPoint = camera->get_d_pixel(pt);
-            pp.distortedPoint = pt;
+            int j_cell = replaceColWithSum ? i + j : (exploreByRow ? j : i);
+            j_cell = flipCol ? board.cols() - 1 - j_cell : j_cell;
 
-            const double err = (camera->get_ud_pixel(pp.undistortedPoint) - pp.distortedPoint).norm();
-            if (err > 1e-3)
-            {
+            if (i_cell < 0 || i_cell >= board.rows() || j_cell < 0 || j_cell >= board.cols())
                 continue;
-            }
 
-            points.push_back(pp);
+            const IndexT idx = board(i_cell, j_cell);
+            if (idx == UndefinedIndexT)
+                continue;
+
+            const calibration::CheckerDetector::CheckerBoardCorner& p = corners[idx];
+
+            calibration::PointWithScale pws;
+            pws.center = p.center;
+            pws.scale = p.scale;
+
+            line.points.push_back(pws);
         }
+
+        // Check that we don't have a too small line which won't be easy to estimate
+        if (line.points.size() < minPointsPerLine)
+            continue;
+
+        lines.push_back(line);
+    }
+
+    return lines;
+}
+
+bool retrieveLines(std::vector<calibration::LineWithPoints>& lineWithPoints, const calibration::CheckerDetector& detect)
+{
+    const std::vector<calibration::CheckerDetector::CheckerBoardCorner>& corners = detect.getCorners();
+    const std::vector<calibration::CheckerDetector::CheckerBoard>& boards = detect.getBoards();
+    
+    for (auto& b : boards)
+    {
+        std::vector<calibration::LineWithPoints> items;
+        
+        items = createLines(corners, b, true, false, false, false, false);
+        lineWithPoints.insert(lineWithPoints.end(), items.begin(), items.end());
+        items = createLines(corners, b, false, false, false, false, false);     
+        lineWithPoints.insert(lineWithPoints.end(), items.begin(), items.end());  
+        items = createLines(corners, b, true, true, false, false, false);
+        lineWithPoints.insert(lineWithPoints.end(), items.begin(), items.end());
+        items = createLines(corners, b, true, true, false, true, false);
+        lineWithPoints.insert(lineWithPoints.end(), items.begin(), items.end());
+        items = createLines(corners, b, false, false, true, false, false);
+        lineWithPoints.insert(lineWithPoints.end(), items.begin(), items.end());
+        items = createLines(corners, b, false, false, true, true, false);
+        lineWithPoints.insert(lineWithPoints.end(), items.begin(), items.end());
+    }
+
+    // Check that enough lines have been generated
+    return lineWithPoints.size() > 1;
+}
+
+struct MinimizationStep
+{
+    std::vector<bool> locks;
+    bool lockAngles;
+};
+
+bool estimateDistortionMultiStep(std::shared_ptr<camera::Undistortion> undistortion,
+                                 calibration::Statistics& statistics,
+                                 std::vector<calibration::LineWithPoints>& lines,
+                                 const std::vector<double> initialParams,
+                                 const std::vector<MinimizationStep> steps)
+{
+    undistortion->setParameters(initialParams);
+
+    for (std::size_t i = 0; i < steps.size(); ++i)
+    {
+        if (!calibration::estimate(undistortion, 
+                                    statistics, 
+                                    lines,
+                                    true, 
+                                    steps[i].lockAngles, 
+                                    steps[i].locks))
+        {
+            ALICEVISION_LOG_ERROR("Failed to calibrate at step " << i);
+            return false;
+        }
+
+        ALICEVISION_LOG_INFO("Result quality of calibration: ");
+        ALICEVISION_LOG_INFO("Mean of error (stddev): " << statistics.mean << "(" << statistics.stddev << ")");
+        ALICEVISION_LOG_INFO("Median of error: " << statistics.median);
+        ALICEVISION_LOG_INFO("Last decile of error: " << statistics.lastDecile);
+        ALICEVISION_LOG_INFO("Max of error: " << statistics.max);
     }
 
     return true;
@@ -468,309 +258,334 @@ bool generatePoints(std::vector<calibration::PointPair> & points, const std::sha
 int aliceVision_main(int argc, char* argv[])
 {
     std::string sfmInputDataFilepath;
-    std::vector<std::string> lensGridFilepaths;
+    std::string checkerBoardsPath;
     std::string sfmOutputDataFilepath;
-    std::string verboseLevel = system::EVerboseLevel_enumToString(system::Logger::getDefaultVerboseLevel());
+    bool handleSqueeze = true;
+    bool isDesqueezed = false;
+    bool bestOnly = false;
+    double forcedPixelAspectRatio = 0.0;
 
-    // Command line parameters
-    po::options_description allParams(
-    "Parse external information about cameras used in a panorama.\n"
-    "AliceVision PanoramaInit");
+    std::string undistortionModelName = "3deanamorphic4";
 
+    // clang-format off
     po::options_description requiredParams("Required parameters");
     requiredParams.add_options()
-    ("input,i", po::value<std::string>(&sfmInputDataFilepath)->required(), "SfMData file input.")
-    ("lensGrid", po::value<std::vector<std::string>>(&lensGridFilepaths)->multitoken(), "Lens Grid images.")
-    ("outSfMData,o", po::value<std::string>(&sfmOutputDataFilepath)->required(), "SfMData file output.")
-    ;
+        ("input,i", po::value<std::string>(&sfmInputDataFilepath)->required(),
+         "SfMData file input.")
+        ("checkerboards", po::value<std::string>(&checkerBoardsPath)->required(),
+         "Checkerboards json files directory.")
+        ("output,o", po::value<std::string>(&sfmOutputDataFilepath)->required(),
+         "SfMData file output.");
+    
+    po::options_description optionalParams("Optional parameters");
+    optionalParams.add_options()
+        ("undistortionModelName", po::value<std::string>(&undistortionModelName)->default_value(undistortionModelName),
+         "Distortion model used for estimating undistortion.")
+        ("handleSqueeze", po::value<bool>(&handleSqueeze)->default_value(handleSqueeze),
+         "Estimate squeeze after estimating distortion")
+        ("isDesqueezed", po::value<bool>(&isDesqueezed)->default_value(isDesqueezed),
+         "Is the image already desqueezed")
+        ("bestOnly", po::value<bool>(&bestOnly)->default_value(bestOnly),
+         "All detected checkerboards are grouped by intrinsic. Distortion parameters are estimated per intrinsic. "
+         "The default behavior is to use all the detected checkerboards in all the images sharing the same intrinsic"
+         " to calibrate the distortion. By checking this option, the application will only keep one image per intrinsic."
+         " This unique image will be selected automatically based on a quality score.")
+        ("forcedPixelAspectRatio", po::value<double>(&forcedPixelAspectRatio)->default_value(forcedPixelAspectRatio),
+         "Force pixel aspect ratio value, overriding metadatas. Ignored if less than or equal 0.0.");
+    // clang-format on
 
-    po::options_description logParams("Log parameters");
-    logParams.add_options()
-    ("verboseLevel,v", po::value<std::string>(&verboseLevel)->default_value(verboseLevel),
-        "verbosity level (fatal, error, warning, info, debug, trace).");
-
-    allParams.add(requiredParams).add(logParams);
-
-    // Parse command line
-    po::variables_map vm;
-    try
+    CmdLine cmdline("This program calibrates camera distortion.\n"
+                    "AliceVision distortionCalibration");
+    cmdline.add(requiredParams);
+    cmdline.add(optionalParams);
+    if (!cmdline.execute(argc, argv))
     {
-        po::store(po::parse_command_line(argc, argv, allParams), vm);
-
-        if(vm.count("help") || (argc == 1))
-        {
-            ALICEVISION_COUT(allParams);
-            return EXIT_SUCCESS;
-        }
-        po::notify(vm);
-    }
-    catch(boost::program_options::required_option& e)
-    {
-        ALICEVISION_CERR("ERROR: " << e.what());
-        ALICEVISION_COUT("Usage:\n\n" << allParams);
-        return EXIT_FAILURE;
-    }
-    catch(boost::program_options::error& e)
-    {
-        ALICEVISION_CERR("ERROR: " << e.what());
-        ALICEVISION_COUT("Usage:\n\n" << allParams);
         return EXIT_FAILURE;
     }
 
-    ALICEVISION_COUT("Program called with the following parameters:");
-    ALICEVISION_COUT(vm);
-
-    system::Logger::get()->setLogLevel(verboseLevel);
-
+    // Load sfmData from disk
     sfmData::SfMData sfmData;
-    if(!sfmDataIO::Load(sfmData, sfmInputDataFilepath, sfmDataIO::ESfMData(sfmDataIO::ALL)))
+    if (!sfmDataIO::load(sfmData, sfmInputDataFilepath, sfmDataIO::ESfMData(sfmDataIO::ALL)))
     {
         ALICEVISION_LOG_ERROR("The input SfMData file '" << sfmInputDataFilepath << "' cannot be read.");
         return EXIT_FAILURE;
     }
 
-    sfmData::Intrinsics& intrinsics = sfmData.getIntrinsics();
-
-    if(intrinsics.empty())
+    // Load the checkerboards
+    std::map<IndexT, calibration::CheckerDetector> boardsAllImages;
+    for (auto& pv : sfmData.getViews())
     {
-        ALICEVISION_LOG_ERROR("No valid intrinsics in input: '" << sfmInputDataFilepath << "'.");
-        return EXIT_FAILURE;
+        IndexT viewId = pv.first;
+
+        // Read the json file
+        std::stringstream ss;
+        ss << checkerBoardsPath << "/"
+           << "checkers_" << viewId << ".json";
+        std::ifstream inputfile(ss.str());
+        if (!inputfile.is_open())
+            continue;
+
+        std::stringstream buffer;
+        buffer << inputfile.rdbuf();
+        boost::json::value jv = boost::json::parse(buffer.str());
+
+        // Store the checkerboard
+        calibration::CheckerDetector detector(boost::json::value_to<calibration::CheckerDetector>(jv));
+        boardsAllImages[viewId] = detector;
     }
 
-    if(intrinsics.size() > 1)
-    {
-        ALICEVISION_LOG_ERROR("This Lens Distortion Calibration software does not support the calibration of multiple intrinsics for now.");
-        return EXIT_FAILURE;
-    }
+    // Retrieve camera model
+    camera::EUNDISTORTION undistortionModel = camera::EUNDISTORTION_stringToEnum(undistortionModelName);
 
-    // Analyze path
-    boost::filesystem::path path(sfmOutputDataFilepath);
-    std::string outputPath = path.parent_path().string();
-
-    if(lensGridFilepaths.empty())
+    // Calibrate each intrinsic independently
+    for (auto& [intrinsicId, intrinsicPtr] : sfmData.getIntrinsics())
     {
-        ALICEVISION_LOG_WARNING("No lens grid image to perform the lens calibration.");
-        if(!sfmDataIO::Save(sfmData, sfmOutputDataFilepath, sfmDataIO::ESfMData(sfmDataIO::ALL)))
+        //Make sure we have only one aspect ratio per intrinsics
+        std::set<double> pa;
+        for (auto& [viewId, viewPtr] : sfmData.getViews())
         {
-            ALICEVISION_LOG_ERROR("The output SfMData file '" << sfmOutputDataFilepath << "' cannot be read.");
+            if (viewPtr->getIntrinsicId() == intrinsicId)
+            {
+                pa.insert(viewPtr->getImage().getDoubleMetadata({"PixelAspectRatio"}));
+            }
+        }
+        
+        if (pa.size() != 1)
+        {
+            ALICEVISION_LOG_ERROR("An intrinsic has multiple views with different Pixel Aspect Ratios");
             return EXIT_FAILURE;
         }
-        return EXIT_SUCCESS;
-    }
 
-    for(auto intrinsicIt: intrinsics)
-    {
-        std::shared_ptr<camera::IntrinsicBase>& intrinsicPtr = intrinsicIt.second;
-        const std::string intrinsicIdStr = std::to_string(intrinsicIt.first);
-        std::shared_ptr<camera::Pinhole> cameraPinhole = std::dynamic_pointer_cast<camera::Pinhole>(intrinsicPtr);
-        if(!cameraPinhole)
+        double pixelAspectRatio = *pa.begin();
+
+        if (forcedPixelAspectRatio > 0.0)
+        {
+            pixelAspectRatio = forcedPixelAspectRatio;
+            ALICEVISION_LOG_INFO("A parameters has overriden the pixel aspect ratio to " << forcedPixelAspectRatio);
+        }
+
+        // Convert to pinhole
+        std::shared_ptr<camera::Pinhole> cameraIn = std::dynamic_pointer_cast<camera::Pinhole>(intrinsicPtr);
+
+        // Create new camera corresponding to given model
+        std::shared_ptr<camera::Pinhole> cameraOut =
+            std::dynamic_pointer_cast<camera::Pinhole>(
+                camera::createIntrinsic(
+                    camera::EINTRINSIC::PINHOLE_CAMERA,
+                    camera::EDISTORTION::DISTORTION_NONE,
+                    undistortionModel,
+                    cameraIn->w(), 
+                    cameraIn->h()
+                )
+            );
+
+        if (!cameraIn || !cameraOut)
         {
             ALICEVISION_LOG_ERROR("Only work for pinhole cameras");
             return EXIT_FAILURE;
         }
-        ALICEVISION_LOG_INFO("Processing Intrinsic " << intrinsicIt.first);
 
-        std::vector<double> params = cameraPinhole->getDistortionParams();
-        for(std::size_t i = 0; i < params.size(); i++)
-            params[i] = 0.0;
-        cameraPinhole->setDistortionParams(params);
+        ALICEVISION_LOG_INFO("Processing Intrinsic " << intrinsicId);
 
-        std::vector<calibration::LineWithPoints> allLineWithPoints;
-        std::vector<std::vector<calibration::LineWithPoints>> lineWithPointsPerImage;
+        // Copy internal data from input camera to output camera
+        cameraOut->setSensorWidth(cameraIn->sensorWidth());
+        cameraOut->setSensorHeight(cameraIn->sensorHeight());
+        cameraOut->setSerialNumber(cameraIn->serialNumber());
+        cameraOut->setScale(cameraIn->getScale());
+        cameraOut->setOffset(cameraIn->getOffset());
 
-        for(const std::string lensGridFilepath : lensGridFilepaths)
+        // Change distortion initialization mode to calibrated
+        cameraOut->setDistortionInitializationMode(camera::EInitMode::CALIBRATED);
+
+        // Retrieve undistortion object
+        std::shared_ptr<camera::Undistortion> undistortion = cameraOut->getUndistortion();
+        if (!undistortion)
         {
-            //Check pixel ratio
-            double pixelRatio = 1.0; // view->getDoubleMetadata({"PixelAspectRatio"}); // TODO
-            if (pixelRatio < 0.0)
-            {
-                pixelRatio = 1.0;
-            }
+            ALICEVISION_LOG_ERROR("Only work for cameras that support undistortion");
+            return EXIT_FAILURE;
+        }
 
-            //Read image
-            image::Image<image::RGBColor> input;
-            image::readImage(lensGridFilepath, input, image::EImageColorSpace::SRGB);
-
-            if (pixelRatio != 1.0)
-            {
-                // if pixel are not squared, convert the image for lines extraction
-                const double w = input.Width();
-                const double h = input.Height();
-                const double nw = w;
-                const double nh = h / pixelRatio;
-                image::Image<image::RGBColor> resizedInput(nw, nh);
-
-                const oiio::ImageSpec imageSpecResized(nw, nh, 3, oiio::TypeDesc::UCHAR);
-                const oiio::ImageSpec imageSpecOrigin(w, h, 3, oiio::TypeDesc::UCHAR);
-
-                const oiio::ImageBuf inBuf(imageSpecOrigin, input.data());
-                oiio::ImageBuf outBuf(imageSpecResized, resizedInput.data());
-
-                oiio::ImageBufAlgo::resize(outBuf, inBuf);
-                input.swap(resizedInput);
-            }
-
-            const Vec2 originalScale = cameraPinhole->getScale();
+        undistortion->setPixelAspectRatio(pixelAspectRatio);
+        undistortion->setDesqueezed(isDesqueezed);
         
-            const double w = input.Width();
-            const double h = input.Height();
-            if(w != cameraPinhole->w())
+        std::set<IndexT> usedViews;
+
+        if (!bestOnly)
+        {
+            //Keep all boards from the same intrinsic
+            for (auto& [viewId, view] : sfmData.getViews())
             {
-                ALICEVISION_THROW_ERROR("Inconsistant size between the image and the camera intrinsics (image: "
-                                        << w << "x" << h << ", camera: " << cameraPinhole->w() << "x" << cameraPinhole->h());
+                if (view->getIntrinsicId() != intrinsicId)
+                {
+                    continue;
+                }
+
+                usedViews.insert(viewId);
             }
+        }
+        else 
+        {
+            IndexT bestView = UndefinedIndexT;
+            double bestScore = 0.0;
 
-            fs::copy_file(lensGridFilepath, fs::path(outputPath) / fs::path(lensGridFilepath).filename(),
-                          fs::copy_option::overwrite_if_exists);
-
-            const std::string checkerImagePath =
-                (fs::path(outputPath) / fs::path(lensGridFilepath).stem()).string() + "_checkerboard.exr";
-
-            // Retrieve lines
-            std::vector<calibration::LineWithPoints> lineWithPoints;
-            if (!retrieveLines(lineWithPoints, input, checkerImagePath))
+            for (auto& [viewId, view] : sfmData.getViews())
             {
-                ALICEVISION_LOG_ERROR("Impossible to extract the checkerboards lines");
+                if (view->getIntrinsicId() != intrinsicId)
+                {
+                    continue;
+                }
+
+                double score = boardsAllImages[viewId].getScore();
+                if (score > bestScore)
+                {
+                    bestView = viewId;
+                    bestScore = score;
+                }
+            }
+            
+            
+            if (bestView != UndefinedIndexT)
+            {
+                ALICEVISION_LOG_INFO("Selecting view #" << bestView << " for intrinsic #" << intrinsicId << ".");
+                usedViews.insert(bestView);
+            }
+        }
+
+        if (usedViews.size() == 0)
+        {
+            ALICEVISION_LOG_INFO("An intrinsic has no associated checkerboard.");
+            continue;
+        }
+
+        // Transform checkerboards to line With points
+        std::vector<calibration::LineWithPoints> allLinesWithPoints;
+        for (auto & viewId : usedViews)
+        {
+            std::vector<calibration::LineWithPoints> linesWithPoints;
+            if (!retrieveLines(linesWithPoints, boardsAllImages[viewId]))
+            {
                 continue;
             }
-            lineWithPointsPerImage.push_back(lineWithPoints);
-            allLineWithPoints.insert(allLineWithPoints.end(), lineWithPoints.begin(), lineWithPoints.end());
+
+            allLinesWithPoints.insert(allLinesWithPoints.end(), linesWithPoints.begin(), linesWithPoints.end());
         }
 
         calibration::Statistics statistics;
+        std::vector<double> initialParams;
+        std::vector<MinimizationStep> steps;
 
-        // Estimate distortion
-        if(std::dynamic_pointer_cast<camera::PinholeRadialK1>(cameraPinhole))
-        {
-            if (!estimateDistortionK1(cameraPinhole, statistics, allLineWithPoints))
-            {
-                ALICEVISION_LOG_ERROR("Error estimating distortion");
-                continue;
-            }
+        if (undistortionModel == camera::EUNDISTORTION::UNDISTORTION_3DEANAMORPHIC4)
+        { 
+            initialParams = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0};
+            steps = {
+                    {
+                        //First, lock everything but lines parameters
+                        {true, true, true, true, true, true, true, true, true, true, true, true, true},
+                        false
+                    },
+                    {
+                        //Unlock 4th first monomials coefficients
+                        {false, false, false, false, true, true, true, true, true, true, true, true, true},
+                        false
+                    },
+                    {
+                        //Unlock all monomials coefficients
+                        {false, false, false, false, false, false, false, false, false, false, true, true, true},
+                        false
+                    },
+                    {
+                        //Unlock shear
+                        {false, false, false, false, false, false, false, false, false, false, false, true, true},
+                        false
+                    }
+                };
         }
-        else if(std::dynamic_pointer_cast<camera::PinholeRadialK3>(cameraPinhole))
+        else if (undistortionModel == camera::EUNDISTORTION::UNDISTORTION_3DECLASSICLD)
         {
-            if (!estimateDistortionK3(cameraPinhole, statistics, allLineWithPoints))
-            {
-                ALICEVISION_LOG_ERROR("Error estimating distortion");
-                continue;
-            }
+            initialParams = {0.0, 1.0, 0.0, 0.0, 0.0};
+            steps = {
+                        {
+                            //First, lock everything but lines 
+                            {true, true, true, true, true},
+                            false
+                        },
+                        {
+                            //Unlock everything but anamorphic part
+                            {false, true, false, false, false},
+                            false
+                        },
+                        {
+                            //Unlock everything
+                            {false, false, false, false, false},
+                            false
+                        }
+                    };
         }
-        else if(std::dynamic_pointer_cast<camera::Pinhole3DERadial4>(cameraPinhole))
+        else if (undistortionModel == camera::EUNDISTORTION::UNDISTORTION_3DERADIAL4)
         {
-            if (!estimateDistortion3DER4(cameraPinhole, statistics, allLineWithPoints))
-            {
-                ALICEVISION_LOG_ERROR("Error estimating distortion");
-                continue;
-            }
+            initialParams = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+            steps = {
+                        {
+                            {true, true, true, true, true, true, true, true},
+                            false
+                        },
+                        {
+                            //lock everything but lines and first coefficient 
+                            {false, true, true, true, true, true, true, true},
+                            false
+                        },
+                        {
+                            //Unlock everything
+                            {false, false, false, false, false, false, false, false},
+                            false
+                        }
+                    };
         }
-        else if(std::dynamic_pointer_cast<camera::Pinhole3DEAnamorphic4>(cameraPinhole))
+        else
         {
-            if (!estimateDistortion3DEA4(cameraPinhole, statistics, allLineWithPoints))
-            {
-                ALICEVISION_LOG_ERROR("Error estimating distortion");
-                continue;
-            }
+            ALICEVISION_LOG_ERROR("Unsupported camera model for undistortion.");
+            return EXIT_FAILURE;
         }
-        else if(std::dynamic_pointer_cast<camera::Pinhole3DEClassicLD>(cameraPinhole))
-        {
-            if (!estimateDistortion3DELD(cameraPinhole, statistics, allLineWithPoints))
-            {
-                ALICEVISION_LOG_ERROR("Error estimating distortion");
-                continue;
-            }
-        }
-        else 
-        {
-            ALICEVISION_LOG_ERROR("Incompatible camera distortion model");
-        }
-
-        ALICEVISION_LOG_INFO("Result quality of calibration: ");
-        ALICEVISION_LOG_INFO("Mean of error (stddev): " << statistics.mean << "(" << statistics.stddev <<")");
-        ALICEVISION_LOG_INFO("Median of error: " << statistics.median);
-
-        std::vector<calibration::PointPair> points;
-        if (!generatePoints(points, cameraPinhole, allLineWithPoints))
-        {
-            ALICEVISION_LOG_ERROR("Error generating points");
-            continue;
-        }
- 
-        // Estimate distortion
-        if(std::dynamic_pointer_cast<camera::PinholeRadialK1>(cameraPinhole))
-        {
-            if (!estimateDistortionK1(cameraPinhole, statistics, points))
-            {
-                ALICEVISION_LOG_ERROR("Error estimating reverse distortion");
-                continue;
-            }
-        }
-        else if(std::dynamic_pointer_cast<camera::PinholeRadialK3>(cameraPinhole))
-        {
-            if (!estimateDistortionK3(cameraPinhole, statistics, points))
-            {
-                ALICEVISION_LOG_ERROR("Error estimating reverse distortion");
-                continue;
-            }
-        }
-        else if(std::dynamic_pointer_cast<camera::Pinhole3DERadial4>(cameraPinhole))
-        {
-            if (!estimateDistortion3DER4(cameraPinhole, statistics, points))
-            {
-                ALICEVISION_LOG_ERROR("Error estimating reverse distortion");
-                continue;
-            }
-        }
-        else if(std::dynamic_pointer_cast<camera::Pinhole3DEAnamorphic4>(cameraPinhole))
-        {
-            if (!estimateDistortion3DEA4(cameraPinhole, statistics, points))
-            {
-                ALICEVISION_LOG_ERROR("Error estimating reverse distortion");
-                continue;
-            }
-        }
-        else if(std::dynamic_pointer_cast<camera::Pinhole3DEClassicLD>(cameraPinhole))
-        {
-            if (!estimateDistortion3DELD(cameraPinhole, statistics, points))
-            {
-                ALICEVISION_LOG_ERROR("Error estimating reverse distortion");
-                continue;
-            }
-        }
-        else 
-        {
-            ALICEVISION_LOG_ERROR("Incompatible camera distortion model");
-        }
-
-        ALICEVISION_LOG_INFO("Result quality of inversion: ");
-        ALICEVISION_LOG_INFO("Mean of error (stddev): " << statistics.mean << "(" << statistics.stddev << ")");
-        ALICEVISION_LOG_INFO("Median of error: " << statistics.median);
         
-        // Export debug images using the estimated distortion
-        for(std::size_t i = 0; i < lensGridFilepaths.size(); ++i)
+        ALICEVISION_LOG_INFO("Estimate distortion parameters");
+        if (!estimateDistortionMultiStep(undistortion, statistics, 
+                                        allLinesWithPoints, 
+                                        initialParams, steps))
         {
-            const std::string lensGridFilepath = lensGridFilepaths[i];
-
-            image::Image<image::RGBColor> input;
-            image::readImage(lensGridFilepath, input, image::EImageColorSpace::SRGB);
-
-            const std::string undistortedImagePath =
-                (fs::path(outputPath) / fs::path(lensGridFilepath).stem()).string() + "_undistorted.exr";
-            const std::string stMapImagePath =
-                (fs::path(outputPath) / fs::path(lensGridFilepath).stem()).string() + "_stmap.exr";
-
-            Vec2 offset;
-            image::Image<image::RGBColor> ud = undistort(offset, cameraPinhole, input);
-            image::writeImage(undistortedImagePath, ud, image::EImageColorSpace::AUTO);
-
-            image::Image<image::RGBfColor> stmap = undistortSTMAP(offset, cameraPinhole, input);
-            image::writeImage(stMapImagePath, stmap, image::EImageColorSpace::NO_CONVERSION);
+            ALICEVISION_LOG_ERROR("Error estimating distortion");
+            return EXIT_FAILURE;
         }
+
+        if (undistortionModel == camera::EUNDISTORTION::UNDISTORTION_3DEANAMORPHIC4)
+        {
+            if (handleSqueeze)
+            {
+                //Check that all views contains only 1 board
+                for (const auto &pdetector : boardsAllImages)
+                {
+                    if (pdetector.second.getBoards().size() > 1)
+                    {
+                        ALICEVISION_LOG_ERROR("Multiple calibration boards are not supported");
+                    }
+                }
+
+                processPerspective(boardsAllImages, undistortion, statistics);
+            }
+        }
+
+        if (statistics.lastDecile > 1.0)
+        {
+            ALICEVISION_LOG_ERROR("Quality seems off for the calibration");
+        }
+
+        // Override input intrinsic with output camera
+        intrinsicPtr = cameraOut;
     }
 
-    if(!sfmDataIO::Save(sfmData, sfmOutputDataFilepath, sfmDataIO::ESfMData(sfmDataIO::ALL)))
+    // Save sfmData to disk
+    if (!sfmDataIO::save(sfmData, sfmOutputDataFilepath, sfmDataIO::ESfMData(sfmDataIO::ALL)))
     {
-        ALICEVISION_LOG_ERROR("The output SfMData file '" << sfmOutputDataFilepath << "' cannot be read.");
+        ALICEVISION_LOG_ERROR("The output SfMData file '" << sfmOutputDataFilepath << "' cannot be written.");
         return EXIT_FAILURE;
     }
 

@@ -6,13 +6,9 @@
 
 #pragma once
 
-#include <algorithm>
 #include <cstddef>
 #include <cassert>
 #include <cmath>
-#include <vector>
-#include <array>
-#include <iostream>
 
 namespace aliceVision {
 namespace hdr {
@@ -34,6 +30,5 @@ const double* getEmorInvCurve(int i);
  */
 const double* getEmorCurve(int i);
 
-
-} // namespace hdr
-} // namespace aliceVision
+}  // namespace hdr
+}  // namespace aliceVision

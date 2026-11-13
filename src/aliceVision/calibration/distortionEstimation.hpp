@@ -8,44 +8,24 @@
 
 #include <aliceVision/numeric/numeric.hpp>
 #include <aliceVision/camera/Pinhole.hpp>
-
+#include <aliceVision/camera/Undistortion.hpp>
 #include <vector>
+#include <memory>
 
 namespace aliceVision {
 namespace calibration {
 
-struct LineWithPoints
-{
-    int index;
-    bool horizontal;
-    double angle;
-    double dist;
-    std::vector<Vec2> points;
-};
-
-struct PointPair
-{
-    Vec2 distortedPoint;
-    Vec2 undistortedPoint;
-};
-
+/**
+ * @brief Statistics on distortion parameters estimation error.
+ */
 struct Statistics
 {
     double mean;
     double stddev;
     double median;
+    double lastDecile;
+    double max;
 };
 
-/**
- * Estimate the parameters of a camera (mostly distortion, from a set of line aligned points)
- */
-bool estimate(std::shared_ptr<camera::Pinhole> & cameraToEstimate, Statistics & statistics, std::vector<LineWithPoints> & lines, bool lockScale, bool lockCenter, const std::vector<bool> & lockDistortions);
-
-/**
- * Estimate the parameters of a camera (mostly distortion, from a set of pairs of <distorted points, undistorted points>)
- */
-bool estimate(std::shared_ptr<camera::Pinhole> & cameraToEstimate, Statistics & statistics, std::vector<PointPair> & points, bool lockScale, bool lockCenter, const std::vector<bool> & lockDistortions);
-
-
-}//namespace calibration
-}//namespace aliceVision
+}  // namespace calibration
+}  // namespace aliceVision

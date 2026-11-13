@@ -6,79 +6,63 @@
 
 #include <aliceVision/numeric/numeric.hpp>
 #include <aliceVision/system/Logger.hpp>
-#include <aliceVision/system/cmdline.hpp>
+#include <aliceVision/cmdline/cmdline.hpp>
 #include <aliceVision/system/main.hpp>
 #include <aliceVision/sfmDataIO/sfmDataIO.hpp>
 #include <aliceVision/sfmDataIO/sceneSample.hpp>
 
-#include <boost/filesystem.hpp>
+#include <filesystem>
 #include <boost/program_options.hpp>
+#include <cstdlib>
+#include <random>
 
 // These constants define the current software version.
 // They must be updated when the command line is changed.
 #define ALICEVISION_SOFTWARE_VERSION_MAJOR 1
-#define ALICEVISION_SOFTWARE_VERSION_MINOR 0
+#define ALICEVISION_SOFTWARE_VERSION_MINOR 1
 
 using namespace aliceVision;
 
-namespace fs = boost::filesystem;
+namespace fs = std::filesystem;
 namespace po = boost::program_options;
 
 int aliceVision_main(int argc, char** argv)
 {
     // command-line parameters
-    std::string verboseLevel = system::EVerboseLevel_enumToString(system::Logger::getDefaultVerboseLevel());
-    std::string sfmOutputDataFilepath; // output folder for splited images
+    std::string sfmOutputDataFilepath;  // output file path for SfM Data
+    sfmDataIO::ESceneType sceneSample = sfmDataIO::ESceneType::SCENE_SPHERE;  // scene type to generate ('cube' or 'sphere')
+    int randomSeed = 1;
 
-    po::options_description allParams(
-        "This program is used to generate a sample scene and save at to a given file path");
-
+    // clang-format off
     po::options_description requiredParams("Required parameters");
-    requiredParams.add_options()("output,o", po::value<std::string>(&sfmOutputDataFilepath)->required(),
-                                 "Output sfm file to generate.");
+    requiredParams.add_options()
+        ("output,o", po::value<std::string>(&sfmOutputDataFilepath)->required(),
+         "Output sfm file to generate.")
+        ("scene,s", po::value<sfmDataIO::ESceneType>(&sceneSample)->default_value(sceneSample),
+         "Scene sample to generate. ['cube', 'sphere']");
 
-    po::options_description logParams("Log parameters");
-    logParams.add_options()("verboseLevel,v", po::value<std::string>(&verboseLevel)->default_value(verboseLevel),
-                            "verbosity level (fatal,  error, warning, info, debug, trace).");
+    po::options_description optionalParams("Optional parameters");
+    optionalParams.add_options()
+        ("randomSeed", po::value<int>(&randomSeed)->default_value(randomSeed),
+         "This seed value will generate a sequence using a linear random generator. Set -1 to use a random seed.");
+    // clang-format on
 
-    allParams.add(requiredParams).add(logParams);
-
-    po::variables_map vm;
-    try
+    CmdLine cmdline("This program is used to generate a sample scene and save it to a given file path.\n"
+                    "AliceVision generateSampleScene");
+    cmdline.add(requiredParams);
+    cmdline.add(optionalParams);
+    if (!cmdline.execute(argc, argv))
     {
-        po::store(po::parse_command_line(argc, argv, allParams), vm);
-
-        if(vm.count("help") || (argc == 1))
-        {
-            ALICEVISION_COUT(allParams);
-            return EXIT_SUCCESS;
-        }
-        po::notify(vm);
-    }
-    catch(boost::program_options::required_option& e)
-    {
-        ALICEVISION_CERR("ERROR: " << e.what());
-        ALICEVISION_COUT("Usage:\n\n" << allParams);
         return EXIT_FAILURE;
     }
-    catch(boost::program_options::error& e)
-    {
-        ALICEVISION_CERR("ERROR: " << e.what());
-        ALICEVISION_COUT("Usage:\n\n" << allParams);
-        return EXIT_FAILURE;
-    }
-
-    ALICEVISION_COUT("Program called with the following parameters:");
-    ALICEVISION_COUT(vm);
-
-    // set verbose level
-    system::Logger::get()->setLogLevel(verboseLevel);
 
     sfmData::SfMData sfmData;
-    sfmDataIO::generateSampleScene(sfmData);
+    // Eigen's Random() used by the scene generation relies on std::rand
+    std::srand(randomSeed == -1 ? std::random_device()() : randomSeed);
+    sfmDataIO::generateSampleScene(sfmData, sceneSample);
 
     ALICEVISION_LOG_INFO("Export SfM: " << sfmOutputDataFilepath);
-    if(!sfmDataIO::Save(sfmData, sfmOutputDataFilepath, sfmDataIO::ESfMData(sfmDataIO::ALL)))
+    if (!sfmDataIO::save(sfmData, sfmOutputDataFilepath, sfmDataIO::ESfMData(sfmDataIO::ALL)))
     {
         ALICEVISION_LOG_ERROR("The output SfMData file '" << sfmOutputDataFilepath << "' cannot be write.");
         return EXIT_FAILURE;

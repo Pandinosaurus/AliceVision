@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include <aliceVision/mvsData/Point2d.hpp>
 #include <aliceVision/mvsData/Point3d.hpp>
 #include <aliceVision/mvsData/StaticVector.hpp>
 #include <aliceVision/mesh/MeshClean.hpp>
@@ -16,7 +15,7 @@ namespace mesh {
 
 class MeshAnalyze : public MeshClean
 {
-public:
+  public:
     MeshAnalyze(mvsUtils::MultiViewParams* _mp);
     ~MeshAnalyze();
 
@@ -32,5 +31,5 @@ public:
     bool getVertexSurfaceNormal(int ptId, Point3d& N);
 };
 
-} // namespace mesh
-} // namespace aliceVision
+}  // namespace mesh
+}  // namespace aliceVision

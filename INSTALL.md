@@ -1,13 +1,13 @@
-AliceVision
-===========
+# AliceVision
 
-Build instructions
-------------------
+For specific build instructions for macOS see [INSTALL_macOS.md](./INSTALL_macOS.md).
+
+## Build instructions
 
 Required tools:
-* CMake >= 3.11
+* CMake >= 3.30
 * Git
-* C/C++ compiler (gcc or visual studio or clang) with C++14 support (i.e. gcc >= 5, clang >= 3.4, msvc >= 19.10, cuda >= 9.0).
+* C/C++ compiler (gcc or Visual Studio or clang) with C++17 support (i.e. gcc >= 7, clang >= 5, msvc >= 19.15, cuda >= 11.0).
 
 ### Compile the project
 
@@ -17,124 +17,122 @@ Getting the sources:
 git clone https://github.com/alicevision/AliceVision.git --recursive
 ```
 
-As AliceVision use some C++11 features you must have a c++11 ready compiler:
-- Visual studio >= 2015 (English language pack required for vcpkg)
-- GCC >= 4.7
-- Clang >= 3.3
-
-Dependencies
-------------
+## Dependencies
 
 AliceVision depends on external libraries:
 
 * [Assimp >= 5.0.0](https://github.com/assimp/assimp)
-* [Boost >= 1.70.0](https://www.boost.org)
+* [Boost >= 1.74.0](https://www.boost.org)
 * [Ceres >= 1.10.0](https://github.com/ceres-solver/ceres-solver)
+* CoinUtils >= 2.9.3; use [our fork](https://github.com/alicevision/CoinUtils) with a CMake build system
+* Coin-or linear programming (Clp); use [our fork](https://github.com/alicevision/Clp) with a CMake build system
 * [Eigen >= 3.3.4](https://gitlab.com/libeigen/eigen)
-* [Geogram >= 1.7.5](https://gforge.inria.fr/frs/?group_id=5833)
-* [OpenEXR >= 2.4.0](https://github.com/AcademySoftwareFoundation/openexr)
-* [OpenImageIO >= 2.1.0](https://github.com/OpenImageIO/oiio)
+* [Expat >= 2.4.8](https://libexpat.github.io/)
+* Flann >= 1.8.4; use [our fork](https://github.com/alicevision/flann) with a CMake build system
+* [Geogram >= 1.7.5 (recommended >= 1.8.8)](https://github.com/BrunoLevy/geogram)
+* [nanoflann >= 1.5.4](https://github.com/jlblancoc/nanoflann)
+* [OpenEXR >= 2.5](https://github.com/AcademySoftwareFoundation/openexr)
+* [OpenImageIO >= 3.0.0](https://github.com/OpenImageIO/oiio)
+* [OpenMesh >= 9.0](https://www.graphics.rwth-aachen.de/software/openmesh/)
+* Open Solver Interface (Osi) >= 0.106.10; use [our fork](https://github.com/alicevision/Osi) with a CMake build system
 * [zlib](https://www.zlib.net)
 
 Other optional libraries can enable specific features (check "CMake Options" for enabling them):
 
 * Alembic (data I/O)
 * CCTag (feature extraction/matching and localization on CPU or GPU)
-* Cuda >= 7.0 (feature extraction and depth map computation)
+* Cuda >= 11.0 (feature extraction and depth map computation)
+* Embree >= 4 (ray tracing)
 * Magma (required for UncertaintyTE)
-* Mosek >= 5 (linear programming)
+* Mosek >= 6 (linear programming)
 * OpenCV >= 3.4.11 (feature extraction, calibration module, video IO), >= 4.5 for colorchecker (mcc)
-* OpenGV (rig calibration and localization)
 * OpenMP (enable multi-threading)
+* PCL (Point Cloud Library) >= 1.12.1 for the registration module
 * PopSift (feature extraction on GPU)
 * UncertaintyTE (Uncertainty computation)
+* Lemon >= 1.3
+* libe57format (support reading .e57 files)
+* SWIG, Python 3 and NumPy 1.26 (Python binding for AliceVision modules)
+
 
 AliceVision also depends on some embedded libraries:
 
-* CoinUtils >= 2.9.3 (internal)
-* Coin-or linear programming (Clp) (internal)
-* Flann >= 1.8.4 (internal)
-* Lemon >= 1.3 (internal)
 * MeshSDFilter (internal)
-* OpenMesh (internal)
-* Open Solver Interface (Osi) >= 0.106.10 (internal)
-
-Building the project using vcpkg (recommended on Windows)
---------------------------------
-[Vcpkg](https://github.com/Microsoft/vcpkg) is a tool that helps in acquiring, building, and managing C/C++ libraries.
-AliceVision's required dependencies can be built with it. Follow the [installation guide](https://github.com/Microsoft/vcpkg/blob/master/README.md#quick-start) to setup vcpkg.
-
-**Note**: while started as a Windows only project, vcpkg recently became cross-platform. In the scope of AliceVision, it has only been tested on Windows.
-
-To build AliceVision using vcpkg:
-1. Setup the environment
-
-#### Windows: CUDA and Visual Studio
-* CUDA >= 10.0
-CUDA 10.0 is fully compatible with **Visual Studio 2017 (Update 8)** which allows to use
-the most recent compiler toolset (v141) to build AliceVision and its dependencies.
-VS2015 can also be used in this configuration.
-*This requires a recent version of CMake (tested with 3.12).*
-
-* CUDA < 10.0
-Due to incompatibilities between CUDA and Visual Studio 2017, **Visual 2015 toolset** must be used to build AliceVision.
-Visual Studio 2017 can be used as an IDE, but v140 toolset must be installed and used for this to work.
-To setup a VS2017 command prompt using the v140 toolset:
-```bash
-# Windows: CUDA < 10.0 + VS2017 v140 toolset
-"C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=14.0
-nmake /version
-# should print Version 14.00.xxx
-```
-2. Build the required dependencies
-```bash
-cd <VCPKG_INSTALL_DIR>
-set VCPKG_ROOT=%cd%
-
-vcpkg install ^
-          boost-algorithm boost-accumulators boost-atomic boost-container boost-date-time boost-exception boost-filesystem boost-graph boost-log ^
-          boost-program-options boost-property-tree boost-ptr-container boost-regex boost-serialization boost-system boost-test boost-thread boost-timer ^
-          lz4 ^
-          openexr ^
-          alembic ^
-          geogram ^
-          eigen3 ^
-          opencv[eigen,ffmpeg,webp,contrib,nonFree,cuda] ^
-          openimageio[libraw,ffmpeg,freetype,opencv,gif,openjpeg,webp] ^
-          ceres[suitesparse,cxsparse] ^
-          cuda ^
-          tbb ^
-          assimp ^
-          --triplet x64-windows
-```
-
-3. Build AliceVision
-```bash
-# With VCPKG_ROOT being the path to the root of vcpkg installation
-cd /path/to/aliceVision/
-mkdir build && cd build
 
 
-# Windows: CUDA >= 10.0 + Visual 2022 + Powershell
-cmake .. -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT"\scripts\buildsystems\vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows -G "Visual Studio 17 2022" -A x64 -T host=x64
 
-# Windows: CUDA >= 10.0 + Visual 2022
-cmake .. -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows -G "Visual Studio 17 2022" -A x64 -T host=x64
+### Building the project using vcpkg (recommended on Windows)
 
-# Windows: CUDA >= 10.0 + Visual 2017
-cmake .. -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows -G "Visual Studio 15 2017" -A x64 -T host=x64
+[vcpkg](https://github.com/alicevision/vcpkg) is a package manager that helps in acquiring, building, and managing C/C++ libraries.
+AliceVision's required dependencies can be built with it.
+vcpkg evolved from being a Windows-only project to becoming cross-platform.
+In the scope of AliceVision, vcpkg has only been tested on Windows.
 
-# Windows: CUDA < 10.0 + Visual 2017 v140 (Visual 2015 toolset)
-cmake .. -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows -G "Visual Studio 15 2017" -A x64 -T v140,host=x64
+1. **Install vcpkg**
 
-# Windows: CUDA < 10.0 + Visual 2015
-cmake .. -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows -G "Visual Studio 14 2015" -A x64 -T v140,host=x64
+    See the reference [installation guide](https://github.com/alicevision/vcpkg/blob/alicevision_master/README.md#quick-start-windows) to setup vcpkg.
+    We recommend to use our vcpkg fork, where dependencies have been validated by the AliceVision development team and where some ports may have custom changes.
+    ```bash
+    git clone https://github.com/alicevision/vcpkg --branch alicevision_master
+    cd vcpkg
+    .\bootstrap-vcpkg.bat
+    set VCPKG_ROOT=%cd%
+    ```
 
-# Windows: this generates a "aliceVision.sln" solution inside the build folder
-```
+2. **Build/install the required dependencies**
 
-Building the project with embedded dependencies
------------------------------------------------
+    There are two options for the dependencies:
+
+    - Build them from scratch on your system.
+        ```bash
+        cd <ALICEVISION_REPOSITORY>
+        %VCPKG_ROOT%\vcpkg.exe install --triplet=x64-windows-release ^
+                                       --host-triplet=x64-windows-release
+        %VCPKG_ROOT%\vcpkg.exe export --raw ^
+                                      --output-dir=\path\to\dependencies ^
+                                      --output=x64-windows-release ^
+                                      --host-triplet=x64-windows-release ^
+                                      --triplet=x64-windows-release
+        ```
+
+     - Install them from a ready-to-use precompiled archive.
+
+         This will save all the compilation time as well as some disk space as there will not be any build artifact, but this requires to use the same CUDA version as the one that was used to generate the archive to be able to build AliceVision later on.
+
+         The archive can be downloaded from [our vcpkg fork's release page](https://github.com/alicevision/vcpkg/releases), with the [latest released archive](https://github.com/alicevision/vcpkg/releases/download/2025.08.22/x64-windows-release.zip) built with CUDA 12.5.0.
+
+         It should be unzipped in `<VCPKG_INSTALL_DIRECTORY>`.
+
+3. **Build AliceVision**
+    ```bash
+    cd <ALICEVISION_DIRECTORY>
+    mkdir build && cd build
+
+    cmake -B . -S .. -DCMAKE_TOOLCHAIN_FILE=\path\to\dependencies\x64-windows-release\scripts\buildsystems\vcpkg.cmake ^
+                     -DVCPKG_TARGET_TRIPLET=x64-windows-release ^
+                     -DCMAKE_BUILD_TYPE=Release -A x64 -T host=x64 ^
+                     -DBUILD_SHARED_LIBS=ON ^
+                     -DTARGET_ARCHITECTURE=core ^
+                     -DCMAKE_INSTALL_PREFIX=\path\to\install ^
+                     -DALICEVISION_BUILD_SWIG_BINDING=ON ^
+                     -DVCPKG_MANIFEST_MODE=OFF ^
+                     -DPython3_EXECUTABLE=\path\to\venv\Scripts\python.exe
+    ```
+
+    The Python used to build AliceVision must be the one the dependencies were built against: the `python3` vcpkg port is overlaid (`vcpkg/overlay_ports/python3`) to install a relocatable [python-build-standalone](https://github.com/astral-sh/python-build-standalone) CPython in `\path\to\dependencies\x64-windows-release\installed\x64-windows-release\tools\python3`.
+    Create a venv from it for the build packages (`tools\python3\python.exe -m venv \path\to\venv`, then `\path\to\venv\Scripts\python.exe -m pip install -r requirements.txt`) and keep the interpreter itself pristine: the `bundle` target embeds it as `<bundle>\python` (see `ALICEVISION_BUNDLE_PYTHON_ROOT`) and reinstalls the venv's packages in it at the same versions (`pip freeze` of `Python3_EXECUTABLE`), so pip needs access to them (index or cache) when making the bundle.
+    Their console scripts (e.g. `pytest.exe`) keep the bundle path they were installed at: use `<bundle>\python\python.exe -m <module>` instead.
+
+    This generates an "aliceVision.sln" solution inside the `build` folder that you can open in Visual Studio to launch the build.
+    Do not forget to switch the build type to "Release". If you want to continue without an IDE, then use:
+
+    ```bash
+    cmake --build build --config Release -t INSTALL
+    cmake --build build --config Release -t BUNDLE
+    ```
+
+
+### Building the project with embedded dependencies (recommended on Linux)
 
 ```bash
 git clone https://github.com/alicevision/AliceVision.git --recursive
@@ -152,10 +150,77 @@ You need `automake` to compile `libpng`.
 Else if you have png already install on your OS, you can disable the PNG build with `-DAV_BUILD_PNG=OFF`.
 
 
-Building the project using external dependencies
-------------------------------------------------
+### Rocky Linux Docker Python runtime and Meshroom packaging
 
-In order to build the library with existing versions of the dependencies (e.g. system installed libraries or user built libraries), and thus reduce the compilation time and favour the modularization, the paths where to find such libraries can be given at cmake command line. In particular:
+The Rocky Linux 9 x86_64 deps image installs an intact, relocatable
+[python-build-standalone](https://github.com/astral-sh/python-build-standalone)
+runtime at **/opt/python**. Both the AliceVision child image and a Meshroom image
+inheriting it retain this directory. It is not a system Python installation or a
+venv, and it is not automatically added to the AliceVision bundle.
+
+The pinned distribution is CPython **3.11.17**, release **20261001**, target
+**x86_64-unknown-linux-gnu**, `pgo+lto-full`. Its archive SHA-256 is
+`a98646d6a9b5366be6af3f8cfb1f15abc1f7841472edf326328342ac2dc23b0d`, verified
+before extraction. The [upstream release](https://github.com/astral-sh/python-build-standalone/releases/tag/20261001)
+publishes the digest. Update the archive version, release and checksum together
+in [docker/Dockerfile_rocky_deps](docker/Dockerfile_rocky_deps); do not use a moving
+latest-release URL. The baseline GNU/Linux build requires glibc >= 2.17 and does
+not introduce x86_64_v3/AVX requirements. Rocky 9 remains the supported image
+baseline; this is not a musl build or an OS-library-free executable. The optional
+Python 3.11 `crypt` module additionally requires the host's libcrypt.so.1.
+
+The full archive supplies the installed runtime plus upstream license texts and
+metadata. The image retains the entire install tree (including libpython, native
+stdlib modules, headers, shared data, `venv`, `ensurepip` and its offline wheels),
+plus all upstream licenses under **/opt/python/licenses** and the distribution
+metadata at **/opt/python/PYTHON.json**. Metadata still describes the original
+full archive; its build-object paths are provenance, not installed files.
+This release omits the zlib-ng license referenced by that metadata. The Dockerfile
+also downloads the license from the matching cpython-source-deps zlib-ng-2.2.4 tag,
+verified against SHA-256
+`6c9f0d975b41afaa34d22f55bb8986ce69e5cb7ad327cb2b28820cd425edf5ee`.
+Only temporary archive/extraction files and non-runtime build artifacts are removed.
+
+Dependency build packages are installed separately in **/opt/python-build-venv**,
+created from the standalone interpreter without system site-packages. Currently
+this adds NumPy 1.26.4; it does not add NumPy to /opt/python. Build PATH and the
+CMake `Python_EXECUTABLE` / `Python3_EXECUTABLE` selectors use the build venv
+explicitly, including OpenImageIO, pybind11, OpenCV and AliceVision's SWIG build.
+System Python required by Rocky's package manager is left alone.
+
+Meshroom's packaging Dockerfile should create **/opt/Meshroom_bundle/python** and
+copy the **whole /opt/python directory**, preserving permissions and symlinks
+(for example, `cp -a /opt/python/. /opt/Meshroom_bundle/python/` in an inherited
+image, or `COPY --from=<alicevision-stage> /opt/python/ /opt/Meshroom_bundle/python/`
+in a multi-stage image). Do not copy /opt/python-build-venv, prune the stdlib or
+licenses, or replace the standalone distribution with a copied venv. Invoke
+**/opt/Meshroom_bundle/python/bin/python3.11** directly and use `-m pip` rather
+than the archive's pip console-script shebang, which may retain a build-time path.
+No activation, PYTHONHOME, PYTHONPATH or LD_LIBRARY_PATH is needed. Meshroom must
+install its own runtime requirements separately; the build venv is not a source
+of release packages. Create any new application venv at its final location after
+copying the runtime: existing venvs are not generally relocatable.
+
+[docker/check-python-relocation.sh](docker/check-python-relocation.sh) is run in
+a network-disabled build step before building dependencies. It tests the base
+interpreter, moves /opt/python to a temporary Meshroom-like location so the
+original path is unavailable, and directly tests the relocated interpreter and
+fresh symlink/copy venv interpreters. A cleared environment and a PATH with no
+Python prevent reliance on system Python or loader/Python overrides. Venv creation
+bootstraps pip offline from ensurepip; pip location, isolation, native stdlib
+operations, internal symlinks and license preservation are checked. The helper
+restores the original directory and removes test venvs on exit.
+
+For a Python-only build validation, select Docker target `toolchain` in
+the Rocky deps Dockerfile with the usual CUDA_VERSION and ROCKY_VERSION build
+arguments; no pre-fetched AliceVision assets or C++ dependency build is needed.
+For release validation, copy only the runtime and this helper into a Python-free
+Rocky 9 minimal container and run the helper via bash with networking disabled.
+Do not remove package-manager Python from the actual dependency image to test this.
+
+### Building the project using external dependencies
+
+In order to build the library with existing versions of the dependencies (e.g. system-installed libraries or user-built libraries), and thus reduce the compilation time and favour the modularization, the paths where to find such libraries can be given at cmake command line. In particular:
 
 * For Ceres solver library, `Ceres_DIR` can be passed pointing to where CeresConfig.cmake can be found.
   e.g. `-DCeres_DIR:PATH=/path/to/ceres/install/share/Ceres/`
@@ -181,107 +246,137 @@ In order to build the library with existing versions of the dependencies (e.g. s
 and `-DOPENIMAGEIO_INCLUDE_DIR:PATH=/path/to/oiio/install/include/`
 
 
-
 At the end of the cmake process, a report shows for each library which version (internal/external) will be used in the building process, e.g.:
 
 ```
 -- EIGEN: 3.3.4
 -- CERES: 1.10.0
--- FLANN: 1.8.4 (external)
--- CLP: 1.15.11 (internal)
--- COINUTILS: 2.9.3 (internal)
--- OSI: 0.106.10 (internal)
--- LEMON: 1.3 (internal)
+-- FLANN: 1.8.4
+-- LEMON: 1.3
 ```
 
 
-CMake Options
--------------
+## CMake Options
 
-* GEOGRAM
+* GEOGRAM  
   `-DGEOGRAM_INSTALL_PREFIX:PATH=path/to/geogram/install`
 
-* OPENIMAGEIO
+* OPENIMAGEIO  
   `-DOPENIMAGEIO_LIBRARY_DIR_HINTS:PATH=/path/to/oiio/install/lib/`
   `-DOPENIMAGEIO_INCLUDE_DIR:PATH=/path/to/oiio/install/include/`
 
-* `BOOST_NO_CXX11` (default `OFF`)
+* `BOOST_NO_CXX11` (default `OFF`)  
   If your Boost binaries are compiled without C++11 support, you need to set this option to avoid compilation errors.
   This is most likely to be the case if you use the system packages to install boost.
 
-* `ALICEVISION_USE_OPENMP` (default `ON`)
-  Use OpenMP parallelization (huge impact on performances)
+* `ALICEVISION_USE_OPENMP` (default `ON`)  
+  Use OpenMP parallelization (huge impact on performances).  
   **OSX**: if you are compiling with clang shipped with XCode, please note that OpenMP is not supported and you need to
-  disable OpenMP passing `-DALICEVISION_USE_OPENMP:BOOL=OFF`.
+  disable OpenMP passing `-DALICEVISION_USE_OPENMP:BOOL=OFF`.  
+  **Windows**: the code is compiled with `/openmp:llvm`, but linked with the LLVM OpenMP runtime (`libomp.dll`) built by the
+  `llvm-openmp` vcpkg port (`vcpkg/ports/llvm-openmp`) instead of Visual Studio's `libomp140.x86_64.dll`, which is not
+  installed by the VC++ redistributable and cannot be shipped. `ALICEVISION_OPENMP_LIBRARY` points to its `libomp.lib`
+  (found automatically in the vcpkg tree).
 
-* `ALICEVISION_USE_CCTAG` (default: `AUTO`)
-  Build with CCTag markers support.
+* `ALICEVISION_USE_CCTAG` (default: `AUTO`)  
+  Build with CCTag markers support.  
   `-DCCTag_DIR:PATH=/path/to/cctag/install/lib/cmake/CCTag` (where CCTagConfig.cmake can be found)
 
-* `ALICEVISION_USE_APRILTAG` (default: `AUTO`)
-  Build with AprilTag markers support.
+* `ALICEVISION_USE_APRILTAG` (default: `AUTO`)  
+  Build with AprilTag markers support.  
   `-Dapriltag_DIR:PATH=/path/to/apriltag/install/share/apriltag/cmake` (where apriltagConfig.cmake can be found)
 
-* `ALICEVISION_USE_OPENGV` (default `AUTO`)
-  Enable use of OpenGV algorithms. Build with openGV for multi-cameras localization.
-  `-DOPENGV_DIR:PATH=/path/to/opengv/install/` (where "include" and "lib" folders can be found)
-  We recommend: `git clone https://github.com/alicevision/opengv.git --branch=cmake_fix_install`
+* `ALICEVISION_USE_EMBREE` (default: `AUTO`)  
+  Build with Embree ray tracing support (required version >= 4).  
+  `-Dembree_DIR:PATH=/path/to/embree/install/lib/cmake/embree-4.4.1` (where embree-config.cmake can be found)
 
-* `ALICEVISION_USE_ALEMBIC` (default `AUTO`)
-  Build with Alembic file format support (required version >= 1.7).
-  `-DAlembic_DIR:PATH=/path/to/alembic/install/lib/cmake/Alembic/` (where AlembicConfig.cmake can be found)
+* `ALICEVISION_USE_ALEMBIC` (default `AUTO`)  
+  Build with Alembic file format support (required version >= 1.7).  
+  `-DAlembic_DIR:PATH=/path/to/alembic/install/lib/cmake/Alembic/` (where AlembicConfig.cmake can be found)  
   With old Alembic versions (<1.6), you need to set many variables: `ALEMBIC_ROOT`, `ALEMBIC_HDF5_ROOT`, `ALEMBIC_ILMBASE_ROOT`, `ALEMBIC_OPENEXR_ROOT`.
 
-* `ALICEVISION_USE_OPENMP` (default: `AUTO`)
-  Enable OpenMP parallelization
+* `ALICEVISION_USE_CUDA` (default: `ON`)  
+  Enable build with CUDA (for feature extraction and depth map computation).  
+  `-DCUDA_TOOLKIT_ROOT_DIR:PATH=/usr/local/cuda-9.1` (adjust the path to your CUDA installation)
 
-* `ALICEVISION_USE_CUDA` (default: `ON`)
-  Enable build with CUDA (for feature extraction and depth map computation)
-  `-DCUDA_TOOLKIT_ROOT_DIR:PATH=/usr/local/cuda-9.1` (adjust the path to your cuda installation)
-
-* `ALICEVISION_USE_POPSIFT` (default: `AUTO`)
-  Enable GPU SIFT implementation.
+* `ALICEVISION_USE_POPSIFT` (default: `AUTO`)  
+  Enable GPU SIFT implementation.  
   `-DPopSift_DIR:PATH=/path/to/popsift/install/lib/cmake/PopSift` (where PopSiftConfig.cmake can be found)
 
-* `ALICEVISION_USE_UNCERTAINTYTE` (default: `AUTO`)
-  Enable Uncertainty computation.
-  `-DUNCERTAINTYTE_DIR:PATH=/path/to/uncertaintyTE/install/` (where `inlude` and `lib` can be found)
-  `-DMAGMA_ROOT:PATH=/path/to/magma/install/` (where `inlude` and `lib` can be found)
+* `ALICEVISION_USE_UNCERTAINTYTE` (default: `AUTO`)  
+  Enable Uncertainty computation.  
+  `-DUNCERTAINTYTE_DIR:PATH=/path/to/uncertaintyTE/install/` (where the `include` and `lib` folders can be found)
+  `-DMAGMA_ROOT:PATH=/path/to/magma/install/` (where the `include` and `lib` folders can be found)
 
-* `ALICEVISION_USE_OPENCV` (default: `OFF`)
-  Build with openCV
+* `ALICEVISION_USE_OPENCV` (default: `OFF`)  
+  Build with OpenCV.  
   `-DOpenCV_DIR:PATH=/path/to/opencv/install/share/OpenCV/` (where OpenCVConfig.cmake can be found)
 
-* `ALICEVISION_REQUIRE_CERES_WITH_SUITESPARSE` (default: `ON`)
+* `ALICEVISION_USE_ONNX_GPU` (default: `ON`)  
+  Enable the use of CUDA for ONNX. On some Windows systems, this may cause errors and this flag should be set to `OFF`.
+
+* `ALICEVISION_REQUIRE_CERES_WITH_SUITESPARSE` (default: `ON`)  
   By default, aliceVision requires Ceres built with SuiteSparse to ensure best performances but you can make SuiteSparse optional with this flag.
 
-* `BUILD_SHARED_LIBS` (default `ON`)
-  Build AliceVision as shared libs (instead of static libs)
+* `BUILD_SHARED_LIBS` (default `ON`)  
+  Build AliceVision as shared libraries (instead of static libraries).
 
-* `ALICEVISION_BUILD_TESTS` (default `OFF`)
-  Build AliceVision tests
+* `ALICEVISION_BUILD_SOFTWARE` (default `ON`)  
+  Build AliceVision command line tools.
 
-* `ALICEVISION_BUILD_DOC` (default `AUTO`)
-  Build AliceVision documentation
+* `ALICEVISION_BUILD_TESTS` (default `OFF`)  
+  Build AliceVision unit tests.
 
-* `ALICEVISION_BUILD_EXAMPLES` (default `ON`)
-  Build AliceVision samples applications (aliceVision software are still built)
+* `ALICEVISION_BUILD_DOC` (default `AUTO`)  
+  Build AliceVision documentation.
 
-* `ALICEVISION_BUILD_COVERAGE` (default `OFF`)
-  Enable code coverage generation (gcc only)
+* `ALICEVISION_BUILD_COVERAGE` (default `OFF`)  
+  Enable code coverage generation (gcc only).
+
+* `ALICEVISION_BUILD_SWIG_BINDING` (default `OFF`)  
+  Build AliceVision's Python binding with SWIG.  
+  AliceVision's Python binding requires Python to be installed on the system, as well as NumPy.
+  For a better compatibility with Meshroom, we advise to use the same Python version as the one used to run Meshroom as well as NumPy 1.26.
+
+* `ALICEVISION_INSTALL_MESHROOM_PLUGIN` (default `ON`)  
+  Copy Meshroom nodes and templates in the installation directory.
 
 
-Linux compilation
------------------
+### CMake options to build specific parts of AliceVision
 
-### Setup the required external library.
+* `ALICEVISION_BUILD_SFM` (default `ON`)  
+  Build the SfM part of AliceVision. If set to `OFF`, all the following options will be disabled: 
+  `ALICEVISION_BUILD_MVS`, `ALICEVISION_BUILD_HDR`, `ALICEVISION_BUILD_PHOTOMETRICSTEREO`, 
+  `ALICEVISION_BUILD_PANORAMA`, `ALICEVISION_BUILD_LIDAR`.
+
+* `ALICEVISION_BUILD_MVS` (default `ON`)  
+  Build the MVS part of AliceVision.
+
+* `ALICEVISION_BUILD_HDR` (default `ON`)  
+  Build the HDR part of AliceVision.
+
+* `ALICEVISION_BUILD_PHOTOMETRICSTEREO` (default `ON`)  
+  Build the Photometric Stereo part of AliceVision.
+
+* `ALICEVISION_BUILD_PANORAMA` (default `ON`)  
+  Build the Panorama part of AliceVision.
+
+* `ALICEVISION_BUILD_LIDAR` (default `AUTO`)  
+  Build the LiDAR part of AliceVision.
+
+
+## Compilation
+
+### Linux compilation
+
+#### Setup the required external library.
 
 * `sudo apt-get install libpng-dev libjpeg-dev libtiff-dev libxxf86vm1 libxxf86vm-dev libxi-dev libxrandr-dev`
 
-* If you want see the view graph svg logs
+* If you want to be able to see the view graph SVG logs:
   `sudo apt-get install graphviz`
 
-### Clone and configure the project:
+#### Clone and configure the project:
 
 ```bash
  git clone --recursive https://github.com/alicevision/AliceVision.git
@@ -289,14 +384,14 @@ Linux compilation
  cmake -DCMAKE_BUILD_TYPE=Release . ../AliceVision
 ```
 
-If you want enable unit tests and examples to the build:
+If you want to enable the build of the unit tests:
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Release -DALICEVISION_BUILD_TESTS=ON -DALICEVISION_BUILD_EXAMPLES=ON ../AliceVision
+cmake -DCMAKE_BUILD_TYPE=Release -DALICEVISION_BUILD_TESTS=ON ../AliceVision
 ```
 
 In order to use the MOSEK 6 back-end for the linear programming aliceVision module:
 
-- Check that you have an up-to-date MOSEK licence, else aliceVision MOSEK unit test will fail.
+- Check that you have an up-to-date MOSEK licence, otherwise the aliceVision MOSEK unit test will fail.
 
 - Then:
 
@@ -313,62 +408,38 @@ If you want to have an IDE openable project with codeblocks:
 cmake -G "CodeBlocks - Unix Makefiles" -DCMAKE_BUILD_TYPE=Release ../AliceVision
 ```
 
-### Compile the project
+#### Compile the project
 
 ```bash
 make
 ```
 
-For a multi-core compilation (Replace NBcore with the number of threads)
+For a multi-core compilation (replace `NBcore` with the number of threads):
 ```bash
 make -j NBcore
 ```
 
-Launch unity tests (if asked at cmake step)
+Launch the unit tests (if built during the compilation step):
 ```bash
 make test
 ```
 
 
-Windows compilation
--------------------
+### Windows compilation
 
 * Checkout the project
-  `git clone --recursive https://github.com/alicevision/aliceVision.git`
-* Open cmake-gui
+  `git clone --recursive https://github.com/alicevision/aliceVision.git`.
+* Open cmake-gui.
   * Fill the source path with the AliceVision path.
-  * Fill the build path with a new directory
-  * Select your Visual Studio IDE and click configure and then generate
+  * Fill the build path with a new directory.
+  * Select your Visual Studio IDE and click configure and then generate.
 * Open the .sln solution created in your build directory.
   * Change the target to Release.
   * Compile the libraries and binaries samples.
 
--------------------
+## Using AliceVision as a third party library dependency in CMake
 
-
-Mac OSX compilation
--------------------
-```bash
-git clone --recursive https://github.com/alicevision/AliceVision.git
-mkdir build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release -G "Xcode" ../AliceVision
-```
-If you want enable unit tests and examples to the build:
-```bash
-cmake -DCMAKE_BUILD_TYPE=Release \
-      -DALICEVISION_BUILD_TESTS=ON \
-      -DALICEVISION_BUILD_EXAMPLES=ON \
-      -G "Xcode" \
-      ../AliceVision
-xcodebuild -configuration Release
-```
---------------------
-
-
-Using AliceVision as a third party library dependency in cmake
---------------------------------------------------------------
-
-AliceVision can be used as a third party once it have been installed.
+AliceVision can be used as a third party library once it has been installed.
 Consider using the `CMAKE_INSTALL_PREFIX` cmake variable to specify a local installation directory.
 Here the syntax to add the variable to the cmake command line (use absolute path), e.g.:
 ```bash
@@ -393,38 +464,121 @@ In general, you need to specify the list of the AliceVision modules that your li
 depends on.
 
 Specify to CMake where AliceVision is installed by using the `AliceVision_DIR` cmake variable: `-DAliceVision_DIR:PATH="YourInstallPath"/share/aliceVision/cmake`
+(this location can be changed when building AliceVision with `ALICEVISION_INSTALL_CMAKEDIR`)
 or by simply adding the installation path to your `CMAKE_PREFIX_PATH`, i.e. `-DCMAKE_PREFIX_PATH:PATH="YourInstallPath"`.
 Check the sample in [samples](src/samples/aliceVisionAs3rdParty) for an example of use.
 
-### Docker image
+### Docker images
 
-A docker image can be built using the CentOS 7 or Ubuntu 18 Dockerfiles.
-The Dockerfiles are based on `nvidia/cuda` images (https://hub.docker.com/r/nvidia/cuda/)
+A docker image can be built using the Ubuntu or Rocky Linux Dockerfiles.
+The Dockerfiles are based on `nvidia/cuda` images (https://hub.docker.com/r/nvidia/cuda/).
 
+To generate the Docker image, just run:
 ```
-docker build --tag alicevision:centos7-cuda7.0 .
-docker build --tag alicevision:ubuntu18.04-cuda9.2 -f Dockerfile_ubuntu .
+./docker/build-rocky.sh
 ```
-
-Parameters `OS_TAG` and `CUDA_TAG` can be passed to build the image with a specific OS and CUDA version.
-Use NPROC=8 to select the number of cores to use, 1 by default.
-For example, the first line of below's commands shows the example to create docker for a CentOS 7 with Cuda 9.2 and second line for Ubuntu 16.04 with Cuda 8.0:
-
+or
 ```
-docker build --build-arg OS_TAG=7 --build-arg CUDA_TAG=9.2 --tag alicevision:centos7-cuda9.2 .
-docker build --build-arg OS_TAG=16.04 --build-arg CUDA_TAG=8.0 --build-arg NPROC=8 --tag alicevision:ubuntu16.04-cuda8.0 -f Dockerfile_ubuntu .
+./docker/build-ubuntu.sh
 ```
 
-In order to run the image [nvidia docker](https://github.com/nvidia/nvidia-docker/wiki/Installation-(version-2.0)) is needed.
+To do it manually, parameters `ROCKY_VERSION`/`UBUNTU_VERSION` and `CUDA_TAG` should be passed to choose the OS and CUDA versions.
+For example, the first line of the commands below shows the example to build a Docker for a Rocky 9 with Cuda 12.1.0, while the second line is for Ubuntu 22.04 with Cuda 12.1.0:
 
 ```
-docker run -it --runtime=nvidia alicevision:centos7-cuda9.2
+docker build --build-arg ROCKY_VERSION=9 --build-arg CUDA_TAG=12.1.0 --tag alicevision:rocky9-cuda12.1.0 -f Dockerfile_rocky .
+docker build --build-arg UBUNTU_VERSION=22.04 --build-arg CUDA_TAG=12.1.0 --build-arg NPROC=8 --tag alicevision:ubuntu22.04-cuda12.1.0 -f Dockerfile_ubuntu .
+```
+
+In order to run the image, [nvidia docker](https://github.com/nvidia/nvidia-docker/wiki/Installation-(version-2.0)) is needed.
+
+```
+docker run -it --runtime=nvidia alicevision:rocky9-cuda12.1.0
+```
+
+#### Runtime data assets
+
+The Docker images do **not** bundle the optional runtime data assets (vocabulary
+tree and ML models): they are large and only needed at run time, not to build
+AliceVision. The corresponding environment variables are pre-set in the image and
+point to `/opt/AliceVision_install/share/aliceVision`:
+
+| Asset | Environment variable | Source |
+| --- | --- | --- |
+| Vocabulary tree | `ALICEVISION_VOCTREE` | https://gitlab.com/alicevision/trainedVocabularyTreeData |
+| Sphere detection model | `ALICEVISION_SPHERE_DETECTION_MODEL` | https://gitlab.com/alicevision/SphereDetectionModel |
+| Color chart detection model | `ALICEVISION_COLORCHARTDETECTION_MODEL_FOLDER` | https://gitlab.com/alicevision/ColorchartDetectionModel |
+
+Download the assets you need into a local directory (keeping the file/folder
+names shown below, as the environment variables point to them), then mount that
+directory when running the container. For example:
+
+```
+mkdir -p assets && cd assets
+wget https://gitlab.com/alicevision/trainedVocabularyTreeData/raw/master/vlfeat_K80L3.SIFT.tree
+wget https://gitlab.com/alicevision/SphereDetectionModel/-/raw/main/sphereDetection_Mask-RCNN.onnx
+git clone https://gitlab.com/alicevision/ColorchartDetectionModel.git ColorChartDetectionModel
+cd ..
+
+docker run -it --runtime=nvidia \
+    -v "$(pwd)/assets:/opt/AliceVision_install/share/aliceVision" \
+    alicevision:rocky9-cuda12.1.0
 ```
 
 To retrieve the generated files:
 
 ```
 # Create an instance of the image, copy the files and remove the temporary docker instance.
-CID=$(docker create alicevision:centos7-cuda9.2) && docker cp ${CID}:/opt/AliceVision_install . && docker cp ${CID}:/opt/AliceVision_bundle . && docker rm ${CID}
+CID=$(docker create alicevision:rocky9-cuda12.1.0) && docker cp ${CID}:/opt/AliceVision_install . && docker cp ${CID}:/opt/AliceVision_bundle . && docker rm ${CID}
 ```
 
+## Environment variable
+
+You must set the `ALICEVISION_ROOT` environment variable to point to your installation directory, regardless of how you installed it.
+
+
+## Using AliceVision with Meshroom
+
+AliceVision provides nodes and templates meant to be used with [Meshroom](https://github.com/alicevision/Meshroom).
+
+To install the plugin, build AliceVision with `ALICEVISION_INSTALL_MESHROOM_PLUGIN=ON` (enabled by default) and set the `MESHROOM_NODES_PATH` and `MESHROOM_PIPELINE_TEMPLATES_PATH` environment variables for Meshroom to detect it.
+- On Windows:
+    ```
+    set MESHROOM_NODES_PATH=%ALICEVISION_ROOT%/share/meshroom;%MESHROOM_NODES_PATH%
+    set MESHROOM_PIPELINE_TEMPLATES_PATH=%ALICEVISION_ROOT%/share/meshroom;%MESHROOM_PIPELINE_TEMPLATES_PATH%
+    ```
+- On Linux:
+    ```
+    export MESHROOM_NODES_PATH=$ALICEVISION_ROOT/share/meshroom:$MESHROOM_NODES_PATH
+    export MESHROOM_PIPELINE_TEMPLATES_PATH=$ALICEVISION_ROOT/share/meshroom:$MESHROOM_PIPELINE_TEMPLATES_PATH
+    ```
+
+To use AliceVision in Meshroom to the best of its abilities, we recommend building with the following flags:
+* `ALICEVISION_USE_OPENCV=ON`
+* `ALICEVISION_BUILD_SWIG_BINDING=ON`
+* `ALICEVISION_USE_POPSIFT=ON`
+* `ALICEVISION_USE_CCTAG=ON`
+* `ALICEVISION_INSTALL_MESHROOM_PLUGIN=ON`
+
+### Environment variables to set for Meshroom
+
+Meshroom relies on specific files provided by AliceVision:
+
+* Sensor database: a text database of sensor width per camera model.
+Provided in AliceVision source tree: {ALICEVISION_REPOSITORY}/src/aliceVision/sensorDB/cameraSensors.db
+* Voctree (optional): for larger datasets (>200 images), greatly improves image matching performances.
+It can be downloaded [here](https://gitlab.com/alicevision/trainedVocabularyTreeData/raw/master/vlfeat_K80L3.SIFT.tree).
+* Sphere detection model (optional): for the automated sphere detection in stereo photometry.
+It can be downloaded [here](https://gitlab.com/alicevision/SphereDetectionModel/-/raw/main/sphereDetection_Mask-RCNN.onnx).
+* Color chart detection models (optional): for the detection of color charts.
+It can be downloaded [here](https://gitlab.com/alicevision/ColorchartDetectionModel).
+
+Environment variables need to be set for Meshroom to find those files:
+```
+ALICEVISION_SENSOR_DB=/path/to/database
+ALICEVISION_VOCTREE=/path/to/voctree
+ALICEVISION_SPHERE_DETECTION_MODEL=/path/to/detection/model
+ALICEVISION_COLORCHARTDETECTION_MODEL_FOLDER=/path/to/ColorChartDetectionModel
+```
+
+If these variables are not set, Meshroom will expect those files to be located in `{ALICEVISION_ROOT}/share/aliceVision`.

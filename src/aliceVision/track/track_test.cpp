@@ -6,9 +6,11 @@
 // You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "aliceVision/track/TracksBuilder.hpp"
+#include "aliceVision/track/TracksMerger.hpp"
 #include "aliceVision/track/tracksUtils.hpp"
-#include "aliceVision/matching/IndMatch.hpp"
+#include "aliceVision/matching/MatchesCollections.hpp"
 
+#include <set>
 #include <vector>
 #include <utility>
 
@@ -21,210 +23,264 @@ using namespace aliceVision::feature;
 using namespace aliceVision::track;
 using namespace aliceVision::matching;
 
+namespace {
 
-BOOST_AUTO_TEST_CASE(Track_Simple) {
+using TrackContent = std::set<std::pair<std::size_t, std::size_t>>;
 
-  // Create some tracks for image (A,B,C)
-  // {A,B,C} imageId will be {0,1,2}
-  // For those image link some features id depicted below
-  //A    B    C
-  //0 -> 0 -> 0
-  //1 -> 1 -> 6
-  //2 -> 3
-
-  // Create the input pairwise correspondences
-  PairwiseMatches map_pairwisematches;
-
-  const IndMatch testAB[] = {IndMatch(0,0), IndMatch(1,1), IndMatch(2,3)};
-  const IndMatch testBC[] = {IndMatch(0,0), IndMatch(1,6)};
-
-  const std::vector<IndMatch> ab(testAB, testAB+3);
-  const std::vector<IndMatch> bc(testBC, testBC+2);
-  const int A = 0;
-  const int B = 1;
-  const int C = 2;
-  map_pairwisematches[ std::make_pair(A, B) ][EImageDescriberType::UNKNOWN] = ab;
-  map_pairwisematches[ std::make_pair(B, C) ][EImageDescriberType::UNKNOWN] = bc;
-
-  //-- Build tracks using the interface tracksbuilder
-  TracksBuilder trackBuilder;
-  trackBuilder.build( map_pairwisematches );
-
-  trackBuilder.exportToStream(std::cout);
-
-  TracksMap map_tracks;
-  trackBuilder.exportToSTL(map_tracks);
-
-  //-------------------
-  // Unit Test check
-  //-------------------
-
-  //0, {(0,0) (1,0) (2,0)}
-  //1, {(0,1) (1,1) (2,6)}
-  //2, {(0,2) (1,3)}
-  const std::pair<std::size_t,std::size_t> GT_Tracks[] =
-  {
-    std::make_pair(0,0), std::make_pair(1,0), std::make_pair(2,0),
-    std::make_pair(0,1), std::make_pair(1,1), std::make_pair(2,6),
-    std::make_pair(0,2), std::make_pair(1,3)
-  };
-
-  BOOST_CHECK_EQUAL(3,  map_tracks.size());
-  std::size_t cpt = 0, i = 0;
-  for (TracksMap::const_iterator iterT = map_tracks.begin();
-    iterT != map_tracks.end();
-    ++iterT, ++i)
-  {
-    BOOST_CHECK_EQUAL(i, iterT->first);
-    for (auto iter = iterT->second.featPerView.begin();
-      iter != iterT->second.featPerView.end();
-      ++iter)
+/**
+ * @brief Convert tracks to a set of {(viewId, featureId)}, independent from the track ids order.
+ * Also checks that the track ids are contiguous.
+ * @param[in] tracks the tracks to convert
+ * @return the content of each track
+ */
+std::set<TrackContent> tracksContent(const TracksMap& tracks)
+{
+    std::set<TrackContent> content;
+    std::size_t expectedId = 0;
+    for (const auto& [trackId, track] : tracks)
     {
-      BOOST_CHECK( GT_Tracks[cpt] == std::make_pair(iter->first, iter->second));
-      ++cpt;
+        // track ids are contiguous
+        BOOST_CHECK_EQUAL(trackId, expectedId++);
+        TrackContent trackContent;
+        for (const auto& [viewId, item] : track.featPerView)
+            trackContent.emplace(viewId, item.featureId);
+        content.insert(trackContent);
     }
-  }
+    return content;
 }
 
-BOOST_AUTO_TEST_CASE(Track_filter_3viewAtLeast) {
+}  // namespace
 
-  //
-  //A    B    C
-  //0 -> 0 -> 0
-  //1 -> 1 -> 6
-  //2 -> 3
-  //
+/**
+ * @brief Build tracks from 3 views and check their content.
+ *
+ * Track ids order is not checked: only the content of each track.
+ */
+BOOST_AUTO_TEST_CASE(Track_Simple)
+{
+    // Create some tracks for image (A,B,C)
+    // {A,B,C} imageId will be {0,1,2}
+    // For those image link some features id depicted below
+    // A    B    C
+    // 0 -> 0 -> 0
+    // 1 -> 1 -> 6
+    // 2 -> 3
 
-  // Create the input pairwise correspondences
-  PairwiseMatches map_pairwisematches;
+    // Create the input pairwise correspondences
+    PairwiseMatches map_pairwisematches;
 
-  IndMatch testAB[] = {IndMatch(0,0), IndMatch(1,1), IndMatch(2,3)};
-  IndMatch testBC[] = {IndMatch(0,0), IndMatch(1,6)};
+    const IndMatch testAB[] = {IndMatch(0, 0), IndMatch(1, 1), IndMatch(2, 3)};
+    const IndMatch testBC[] = {IndMatch(0, 0), IndMatch(1, 6)};
 
+    const std::vector<IndMatch> ab(testAB, testAB + 3);
+    const std::vector<IndMatch> bc(testBC, testBC + 2);
+    const int A = 0;
+    const int B = 1;
+    const int C = 2;
+    map_pairwisematches[std::make_pair(A, B)][EImageDescriberType::UNKNOWN] = ab;
+    map_pairwisematches[std::make_pair(B, C)][EImageDescriberType::UNKNOWN] = bc;
 
-  std::vector<IndMatch> ab(testAB, testAB+3);
-  std::vector<IndMatch> bc(testBC, testBC+2);
-  const int A = 0;
-  const int B = 1;
-  const int C = 2;
-  map_pairwisematches[ std::make_pair(A,B) ][EImageDescriberType::UNKNOWN] = ab;
-  map_pairwisematches[ std::make_pair(B,C) ][EImageDescriberType::UNKNOWN] = bc;
+    //-- Build tracks using the interface tracksbuilder
+    TracksBuilder trackBuilder;
+    trackBuilder.build(map_pairwisematches);
 
-  //-- Build tracks using the interface tracksbuilder
-  TracksBuilder trackBuilder;
-  trackBuilder.build( map_pairwisematches );
-  BOOST_CHECK_EQUAL(3, trackBuilder.nbTracks());
-  trackBuilder.filter(true, 3);
-  BOOST_CHECK_EQUAL(2, trackBuilder.nbTracks());
+    trackBuilder.exportToStream(std::cout);
+
+    TracksMap map_tracks;
+    trackBuilder.exportToSTL(map_tracks);
+
+    //-------------------
+    // Unit Test check
+    //-------------------
+
+    // {(0,0) (1,0) (2,0)}
+    // {(0,1) (1,1) (2,6)}
+    // {(0,2) (1,3)}
+    const std::set<TrackContent> GT_Tracks{{{0, 0}, {1, 0}, {2, 0}}, {{0, 1}, {1, 1}, {2, 6}}, {{0, 2}, {1, 3}}};
+
+    BOOST_CHECK_EQUAL(3, map_tracks.size());
+    BOOST_CHECK(tracksContent(map_tracks) == GT_Tracks);
 }
 
-BOOST_AUTO_TEST_CASE(Track_Conflict) {
+/**
+ * @brief Check that filter() removes the tracks seen by less than 3 views.
+ */
+BOOST_AUTO_TEST_CASE(Track_filter_3viewAtLeast)
+{
+    //
+    // A    B    C
+    // 0 -> 0 -> 0
+    // 1 -> 1 -> 6
+    // 2 -> 3
+    //
 
-  //
-  //A    B    C
-  //0 -> 0 -> 0
-  //1 -> 1 -> 6
-  //{2 -> 3 -> 2
-  //      3 -> 8 } This track must be deleted, index 3 appears two times
-  //
+    // Create the input pairwise correspondences
+    PairwiseMatches map_pairwisematches;
 
-  // Create the input pairwise correspondences
-  PairwiseMatches map_pairwisematches;
+    IndMatch testAB[] = {IndMatch(0, 0), IndMatch(1, 1), IndMatch(2, 3)};
+    IndMatch testBC[] = {IndMatch(0, 0), IndMatch(1, 6)};
 
-  const IndMatch testAB[] = {IndMatch(0,0), IndMatch(1,1), IndMatch(2,3)};
-  const IndMatch testBC[] = {IndMatch(0,0), IndMatch(1,6), IndMatch(3,2), IndMatch(3,8)};
+    std::vector<IndMatch> ab(testAB, testAB + 3);
+    std::vector<IndMatch> bc(testBC, testBC + 2);
+    const int A = 0;
+    const int B = 1;
+    const int C = 2;
+    map_pairwisematches[std::make_pair(A, B)][EImageDescriberType::UNKNOWN] = ab;
+    map_pairwisematches[std::make_pair(B, C)][EImageDescriberType::UNKNOWN] = bc;
 
-  std::vector<IndMatch> ab(testAB, testAB+3);
-  std::vector<IndMatch> bc(testBC, testBC+4);
-  const int A = 0;
-  const int B = 1;
-  const int C = 2;
-  map_pairwisematches[ std::make_pair(A,B) ][EImageDescriberType::UNKNOWN] = ab;
-  map_pairwisematches[ std::make_pair(B,C) ][EImageDescriberType::UNKNOWN] = bc;
-
-  //-- Build tracks using the interface tracksbuilder
-  TracksBuilder trackBuilder;
-  trackBuilder.build( map_pairwisematches );
-
-  BOOST_CHECK_EQUAL(3, trackBuilder.nbTracks());
-  trackBuilder.filter(true, 2); // Key feature tested here to kill the conflicted track
-  BOOST_CHECK_EQUAL(2, trackBuilder.nbTracks());
-
-  TracksMap map_tracks;
-  trackBuilder.exportToSTL(map_tracks);
-
-  //-------------------
-  // Unit Test check
-  //-------------------
-
-  //0, {(0,0) (1,0) (2,0)}
-  //1, {(0,1) (1,1) (2,6)}
-  const std::pair<std::size_t,std::size_t> GT_Tracks[] =
-    {std::make_pair(0,0), std::make_pair(1,0), std::make_pair(2,0),
-     std::make_pair(0,1), std::make_pair(1,1), std::make_pair(2,6)};
-
-  BOOST_CHECK_EQUAL(2,  map_tracks.size());
-  std::size_t cpt = 0, i = 0;
-  for (TracksMap::const_iterator iterT = map_tracks.begin();
-    iterT != map_tracks.end();
-    ++iterT, ++i)
-  {
-    BOOST_CHECK_EQUAL(i, iterT->first);
-    for (auto iter = iterT->second.featPerView.begin();
-      iter != iterT->second.featPerView.end();
-      ++iter)
-    {
-      BOOST_CHECK( GT_Tracks[cpt] == std::make_pair(iter->first, iter->second));
-      ++cpt;
-    }
-  }
+    //-- Build tracks using the interface tracksbuilder
+    TracksBuilder trackBuilder;
+    trackBuilder.build(map_pairwisematches);
+    BOOST_CHECK_EQUAL(3, trackBuilder.nbTracks());
+    trackBuilder.filter(true, 3);
+    BOOST_CHECK_EQUAL(2, trackBuilder.nbTracks());
 }
 
+/**
+ * @brief Check that filter() removes the track which has 2 observations in the same view.
+ */
+BOOST_AUTO_TEST_CASE(Track_Conflict)
+{
+    //
+    // A    B    C
+    // 0 -> 0 -> 0
+    // 1 -> 1 -> 6
+    //{2 -> 3 -> 2
+    //      3 -> 8 } This track must be deleted, index 3 appears two times
+    //
+
+    // Create the input pairwise correspondences
+    PairwiseMatches map_pairwisematches;
+
+    const IndMatch testAB[] = {IndMatch(0, 0), IndMatch(1, 1), IndMatch(2, 3)};
+    const IndMatch testBC[] = {IndMatch(0, 0), IndMatch(1, 6), IndMatch(3, 2), IndMatch(3, 8)};
+
+    std::vector<IndMatch> ab(testAB, testAB + 3);
+    std::vector<IndMatch> bc(testBC, testBC + 4);
+    const int A = 0;
+    const int B = 1;
+    const int C = 2;
+    map_pairwisematches[std::make_pair(A, B)][EImageDescriberType::UNKNOWN] = ab;
+    map_pairwisematches[std::make_pair(B, C)][EImageDescriberType::UNKNOWN] = bc;
+
+    //-- Build tracks using the interface tracksbuilder
+    TracksBuilder trackBuilder;
+    trackBuilder.build(map_pairwisematches);
+
+    BOOST_CHECK_EQUAL(3, trackBuilder.nbTracks());
+    trackBuilder.filter(true, 2);  // Key feature tested here to kill the conflicted track
+    BOOST_CHECK_EQUAL(2, trackBuilder.nbTracks());
+
+    TracksMap map_tracks;
+    trackBuilder.exportToSTL(map_tracks);
+
+    //-------------------
+    // Unit Test check
+    //-------------------
+
+    // {(0,0) (1,0) (2,0)}
+    // {(0,1) (1,1) (2,6)}
+    const std::set<TrackContent> GT_Tracks{{{0, 0}, {1, 0}, {2, 0}}, {{0, 1}, {1, 1}, {2, 6}}};
+
+    BOOST_CHECK_EQUAL(2, map_tracks.size());
+    BOOST_CHECK(tracksContent(map_tracks) == GT_Tracks);
+}
+
+/**
+ * @brief Check getCommonTracksInImages() on TracksPerView, including an unknown view.
+ */
 BOOST_AUTO_TEST_CASE(Track_GetCommonTracksInImages)
 {
-  {
-    std::set<std::size_t> set_imageIndex {15, 20};
-    TracksPerView map_tracksPerView;
+    {
+        std::set<std::size_t> set_imageIndex{15, 20};
+        TracksPerView map_tracksPerView;
 
-    std::vector<std::size_t> base{1,2,3,4};
-    map_tracksPerView[10] = base;
-    map_tracksPerView[15] = base;
-    map_tracksPerView[20] = base;
-    map_tracksPerView[40] = base;
-    map_tracksPerView[15].push_back(5);
-    map_tracksPerView[20].push_back(6);
+        std::vector<std::size_t> base{1, 2, 3, 4};
+        map_tracksPerView[10] = base;
+        map_tracksPerView[15] = base;
+        map_tracksPerView[20] = base;
+        map_tracksPerView[40] = base;
+        map_tracksPerView[15].push_back(5);
+        map_tracksPerView[20].push_back(6);
 
-    std::set<std::size_t> set_visibleTracks;
-    getCommonTracksInImages(set_imageIndex, map_tracksPerView, set_visibleTracks);
-    BOOST_CHECK_EQUAL(base.size(), set_visibleTracks.size());
-    set_visibleTracks.clear();
-    // test non-existing view index
-    getCommonTracksInImages({15, 50}, map_tracksPerView, set_visibleTracks);
-    BOOST_CHECK(set_visibleTracks.empty());
-  }
-  {
-    std::set<std::size_t> set_imageIndex {15, 20, 10, 40};
-    TracksPerView map_tracksPerView;
+        std::set<std::size_t> set_visibleTracks;
+        getCommonTracksInImages(set_imageIndex, map_tracksPerView, set_visibleTracks);
+        BOOST_CHECK_EQUAL(base.size(), set_visibleTracks.size());
+        set_visibleTracks.clear();
+        // test non-existing view index
+        getCommonTracksInImages({15, 50}, map_tracksPerView, set_visibleTracks);
+        BOOST_CHECK(set_visibleTracks.empty());
+    }
+    {
+        std::set<std::size_t> set_imageIndex{15, 20, 10, 40};
+        TracksPerView map_tracksPerView;
 
-    std::vector<std::size_t> base{1,2,3,4};
-    map_tracksPerView[10] = base;
-    map_tracksPerView[15] = base;
-    map_tracksPerView[20] = base;
-    map_tracksPerView[40] = base;
+        std::vector<std::size_t> base{1, 2, 3, 4};
+        map_tracksPerView[10] = base;
+        map_tracksPerView[15] = base;
+        map_tracksPerView[20] = base;
+        map_tracksPerView[40] = base;
 
-    map_tracksPerView[10].push_back(100);
-    map_tracksPerView[15].push_back(100);
-    map_tracksPerView[20].push_back(100);
+        map_tracksPerView[10].push_back(100);
+        map_tracksPerView[15].push_back(100);
+        map_tracksPerView[20].push_back(100);
 
-    map_tracksPerView[15].push_back(200);
-    map_tracksPerView[20].push_back(200);
-    map_tracksPerView[40].push_back(200);
+        map_tracksPerView[15].push_back(200);
+        map_tracksPerView[20].push_back(200);
+        map_tracksPerView[40].push_back(200);
 
-    map_tracksPerView[15].push_back(5);
-    map_tracksPerView[20].push_back(6);
+        map_tracksPerView[15].push_back(5);
+        map_tracksPerView[20].push_back(6);
 
-    std::set<std::size_t> set_visibleTracks;
-    getCommonTracksInImages(set_imageIndex, map_tracksPerView, set_visibleTracks);
-    BOOST_CHECK_EQUAL(base.size(), set_visibleTracks.size());
-  }
+        std::set<std::size_t> set_visibleTracks;
+        getCommonTracksInImages(set_imageIndex, map_tracksPerView, set_visibleTracks);
+        BOOST_CHECK_EQUAL(base.size(), set_visibleTracks.size());
+    }
+}
+
+/**
+ * @brief Check that TracksMerger merges tracks sharing a feature and keeps the others separated.
+ */
+BOOST_AUTO_TEST_CASE(Track_Merger)
+{
+    TracksMerger merger;
+
+    TracksMap map1, map2;
+
+    map1[0].descType = EImageDescriberType::UNKNOWN;
+    map1[0].featPerView[0].featureId = 100;
+    map1[0].featPerView[1].featureId = 101;
+    map1[0].featPerView[2].featureId = 102;
+    map1[0].featPerView[3].featureId = 103;
+
+    map1[1].descType = EImageDescriberType::SIFT;
+    map1[1].featPerView[0].featureId = 200;
+    map1[1].featPerView[1].featureId = 201;
+    map1[1].featPerView[2].featureId = 202;
+    map1[1].featPerView[3].featureId = 203;
+
+    map2[0].descType = EImageDescriberType::UNKNOWN;
+    map2[0].featPerView[0].featureId = 100;
+    map2[0].featPerView[4].featureId = 104;
+    map2[0].featPerView[5].featureId = 105;
+    map2[0].featPerView[6].featureId = 106;
+
+    map2[1].descType = EImageDescriberType::UNKNOWN;
+    map2[1].featPerView[0].featureId = 200;
+    map2[1].featPerView[1].featureId = 204;
+    map2[1].featPerView[2].featureId = 205;
+    map2[1].featPerView[3].featureId = 206;
+
+    merger.addTrackMap(map1);
+    merger.addTrackMap(map2);
+
+    const auto & result = merger.getOutputTracks();
+
+    BOOST_CHECK_EQUAL(result.size(), 3);
+
+    size_t max = result.at(0).featPerView.size();
+    max = std::max(max, result.at(1).featPerView.size());
+    max = std::max(max, result.at(2).featPerView.size());
+
+    BOOST_CHECK_EQUAL(max, 7);
 }

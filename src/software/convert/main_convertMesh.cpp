@@ -5,15 +5,16 @@
 // You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include <aliceVision/system/Logger.hpp>
-#include <aliceVision/system/cmdline.hpp>
+#include <aliceVision/cmdline/cmdline.hpp>
 #include <aliceVision/system/main.hpp>
 #include <aliceVision/system/Timer.hpp>
+#include <aliceVision/utils/filesIO.hpp>
 #include <aliceVision/mesh/Texturing.hpp>
 #include <aliceVision/mesh/Mesh.hpp>
 
 #include <boost/program_options.hpp>
-#include <boost/filesystem.hpp>
 
+#include <filesystem>
 #include <iostream>
 #include <fstream>
 #include <ostream>
@@ -21,13 +22,13 @@
 
 // These constants define the current software version.
 // They must be updated when the command line is changed.
-#define ALICEVISION_SOFTWARE_VERSION_MAJOR 1
+#define ALICEVISION_SOFTWARE_VERSION_MAJOR 2
 #define ALICEVISION_SOFTWARE_VERSION_MINOR 0
 
 using namespace aliceVision;
 
 namespace po = boost::program_options;
-namespace fs = boost::filesystem;
+namespace fs = std::filesystem;
 
 /**
  * @brief Convert Mesh
@@ -35,72 +36,53 @@ namespace fs = boost::filesystem;
 int aliceVision_main(int argc, char** argv)
 {
     // timer initialization
-
     system::Timer timer;
 
-    // command-line parameters
-
-    std::string verboseLevel = system::EVerboseLevel_enumToString(system::Logger::getDefaultVerboseLevel());
+    // command-line required parameters 
     std::string inputMeshPath;
-    std::string outputFilePath;
+    std::string outputMeshPath;
 
-    po::options_description allParams("AliceVision convertMesh\n"
-                                      "The program allows to convert a mesh to another mesh format.");
+    // command-line optional parameters 
+    bool flipNormals = false;
+    bool copyTextures = true;
 
+    // clang-format off
     po::options_description requiredParams("Required parameters");
     requiredParams.add_options()
-      ("inputMesh", po::value<std::string>(&inputMeshPath)->default_value(inputMeshPath),
-        "Mesh file path (*.obj, *.mesh, *.meshb, *.ply, *.off, *.stl).")
-      ("output,o", po::value<std::string>(&outputFilePath)->default_value(outputFilePath),
-        "Output file path for the new mesh file (*.obj, *.mesh, *.meshb, *.ply, *.off, *.stl)");
+        ("inputMesh", po::value<std::string>(&inputMeshPath)->required(),
+         "Mesh file path (*.obj, *.fbx, *.gltf, *.glb, *.stl, *.ply).")
+        ("output,o", po::value<std::string>(&outputMeshPath)->required(),
+         "Output file path (*.obj, *.fbx, *.gltf, *.glb, *.stl *.ply).");
 
-    po::options_description logParams("Log parameters");
-    logParams.add_options()
-      ("verboseLevel,v", po::value<std::string>(&verboseLevel)->default_value(verboseLevel),
-        "verbosity level (fatal, error, warning, info, debug, trace).");
+    po::options_description optionalParams("Optional parameters");
+    optionalParams.add_options()
+        ("flipNormals", po::value<bool>(&flipNormals)->default_value(flipNormals),
+         "Flip face normals. It can be needed as it depends on the vertices order in triangles and the "
+         "convention changes from one software to another.")
+        ("copyTextures", po::value<bool>(&copyTextures)->default_value(copyTextures),
+         "Copy input mesh texture files to the output mesh folder.");
+    // clang-format on
 
-    allParams.add(requiredParams).add(logParams);
+    CmdLine cmdline("The program allows to convert a mesh to another mesh format.\n"
+                    "AliceVision convertMesh");
 
-    po::variables_map vm;
-    try
+    cmdline.add(requiredParams);
+    cmdline.add(optionalParams);
+
+    if (!cmdline.execute(argc, argv))
     {
-        po::store(po::parse_command_line(argc, argv, allParams), vm);
-
-        if(vm.count("help") || (argc == 1))
-        {
-            ALICEVISION_COUT(allParams);
-            return EXIT_SUCCESS;
-        }
-        po::notify(vm);
-    }
-    catch(boost::program_options::required_option& e)
-    {
-        ALICEVISION_CERR("ERROR: " << e.what());
-        ALICEVISION_COUT("Usage:\n\n" << allParams);
         return EXIT_FAILURE;
     }
-    catch(boost::program_options::error& e)
-    {
-        ALICEVISION_CERR("ERROR: " << e.what());
-        ALICEVISION_COUT("Usage:\n\n" << allParams);
-        return EXIT_FAILURE;
-    }
-
-    ALICEVISION_COUT("Program called with the following parameters:");
-    ALICEVISION_COUT(vm);
-
-    // set verbose level
-    system::Logger::get()->setLogLevel(verboseLevel);
 
     // check first mesh file path
-    if(!inputMeshPath.empty() && !fs::exists(inputMeshPath) && !fs::is_regular_file(inputMeshPath))
+    if (!inputMeshPath.empty() && !utils::exists(inputMeshPath) && !fs::is_regular_file(inputMeshPath))
     {
         ALICEVISION_LOG_ERROR("The input mesh file doesn't exist");
         return EXIT_FAILURE;
     }
 
     // check output file path
-    if(outputFilePath.empty())
+    if (outputMeshPath.empty())
     {
         ALICEVISION_LOG_ERROR("Invalid output");
         return EXIT_FAILURE;
@@ -108,11 +90,11 @@ int aliceVision_main(int argc, char** argv)
 
     // ensure output folder exists
     {
-        const std::string outputFolderPart = fs::path(outputFilePath).parent_path().string();
+        const std::string outputFolderPart = fs::path(outputMeshPath).parent_path().string();
 
-        if(!outputFolderPart.empty() && !fs::exists(outputFolderPart))
+        if (!outputFolderPart.empty() && !utils::exists(outputFolderPart))
         {
-            if(!fs::create_directory(outputFolderPart))
+            if (!fs::create_directory(outputFolderPart))
             {
                 ALICEVISION_LOG_ERROR("Cannot create output folder");
                 return EXIT_FAILURE;
@@ -121,27 +103,58 @@ int aliceVision_main(int argc, char** argv)
     }
 
     // load input mesh
+    ALICEVISION_LOG_INFO("Loading input mesh.");
     mesh::Texturing texturing;
-    texturing.loadWithAtlas(inputMeshPath);
+    texturing.loadWithMaterial(inputMeshPath, flipNormals);
     mesh::Mesh* inputMesh = texturing.mesh;
 
-    if(!inputMesh)
+    // check if mesh is loaded
+    if (!inputMesh)
     {
         ALICEVISION_LOG_ERROR("Unable to read input mesh from the file: " << inputMeshPath);
         return EXIT_FAILURE;
     }
 
-    if(inputMesh->pts.empty() || inputMesh->tris.empty())
+    // check if mesh is not empty
+    if (inputMesh->pts.empty() || inputMesh->tris.empty())
     {
-        ALICEVISION_LOG_ERROR("Error: empty mesh from the file " << inputMeshPath);
-        ALICEVISION_LOG_ERROR("Input mesh: " << inputMesh->pts.size() << " vertices and " << inputMesh->tris.size()
-                                             << " facets.");
+        ALICEVISION_LOG_ERROR("Empty input mesh from the file: " << inputMeshPath);
+        ALICEVISION_LOG_ERROR("Input mesh: " << inputMesh->pts.size() << " vertices and " << inputMesh->tris.size() << " facets.");
         return EXIT_FAILURE;
     }
 
+    // copy textures files from the input mesh folder to the output mesh folder
+    if (copyTextures)
+    {
+        const std::string outTypeStr = std::filesystem::path(outputMeshPath).extension().string().substr(1);
+        const mesh::EFileType outType = mesh::EFileType_stringToEnum(outTypeStr);
+
+        // only copy textures for mesh formats that support textures
+        if (outType == mesh::EFileType::OBJ || 
+            outType == mesh::EFileType::FBX || 
+            outType == mesh::EFileType::GLTF || 
+            outType == mesh::EFileType::GLB)
+        {
+            for (const auto& texturePath : texturing.material.getAllTextures())
+            {
+                ALICEVISION_LOG_DEBUG("Copying texture file: " << texturePath);
+
+                const fs::path srcPath = fs::path(inputMeshPath).parent_path() / texturePath;
+                const fs::path dstPath = fs::path(outputMeshPath).parent_path() / texturePath;
+
+                fs::copy(srcPath, dstPath);
+            }
+        }
+    }
+    
     // save output mesh
-    ALICEVISION_LOG_INFO("Convert mesh.");
-    inputMesh->save(outputFilePath);
+    ALICEVISION_LOG_INFO("Saving output mesh.");
+    {
+        const auto outPath = std::filesystem::path(outputMeshPath);
+        const mesh::EFileType outFileType = mesh::EFileType_stringToEnum(outPath.extension().string().substr(1));
+
+        texturing.saveAs(outPath.parent_path().string(), outPath.stem().string(), outFileType);
+    }
 
     ALICEVISION_LOG_INFO("Task done in (s): " + std::to_string(timer.elapsed()));
 

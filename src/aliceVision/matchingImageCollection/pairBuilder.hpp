@@ -7,27 +7,15 @@
 
 #pragma once
 
-#include <aliceVision/types.hpp>
 #include <aliceVision/sfmData/SfMData.hpp>
-
-#include <algorithm>
 
 namespace aliceVision {
 
-/// Generate all the (I,J) pairs of the upper diagonal of the NxN matrix
-PairSet exhaustivePairs(const sfmData::Views& views, int rangeStart=-1, int rangeSize=0);
+/**
+ * @brief Generate all the (I,J) pairs of the upper diagonal of the NxN matrix
+ * @param views the sfmData views indices list
+ * @return a generated set of pairs
+ */
+PairSet exhaustivePairs(const std::set<IndexT> & viewIds);
 
-/// Load a set of PairSet from a file
-/// I J K L (pair that link I)
-bool loadPairs(
-     const std::string &sFileName, // filename of the list file,
-     PairSet & pairs,
-     int rangeStart=-1,
-     int rangeSize=0);
-
-/// Save a set of PairSet to a file (one pair per line)
-/// I J
-/// I K
-bool savePairs(const std::string &sFileName, const PairSet & pairs);
-
-}; // namespace aliceVision
+};  // namespace aliceVision

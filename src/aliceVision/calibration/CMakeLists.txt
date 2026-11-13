@@ -1,47 +1,38 @@
 # Headers
 set(calibration_files_headers
-  calibration.hpp
-  bestImages.hpp
-  patternDetect.hpp
-  exportData.hpp
-  distortionEstimation.hpp
-  checkerDetector.hpp
+
+    distortionEstimation.hpp
+    distortionEstimationLine.hpp
+    distortionEstimationPoint.hpp
+    distortionEstimationGeometry.hpp
+    checkerDetector.hpp
+    checkerDetector_io.hpp
 )
 
 # Sources
 set(calibration_files_sources
-  distortionEstimation.cpp
-  checkerDetector.cpp
+    distortionEstimationLine.cpp
+    distortionEstimationPoint.cpp
+    distortionEstimationGeometry.cpp
+    checkerDetector.cpp
+    checkerDetector_io.cpp
 )
 
-if(ALICEVISION_HAVE_OPENCV)
-  list(APPEND calibration_files_sources 
-    bestImages.cpp
-    calibration.cpp
-    patternDetect.cpp
-    exportData.cpp
-  )
-endif()
 
 alicevision_add_library(aliceVision_calibration
-  SOURCES ${calibration_files_headers} ${calibration_files_sources}
-  PRIVATE_LINKS
-    aliceVision_image
-    aliceVision_system
-    aliceVision_dataio
-    Boost::filesystem
-    Boost::program_options
-    Boost::boost
-    ${CERES_LIBRARIES}
+    SOURCES ${calibration_files_headers} ${calibration_files_sources}
+    PRIVATE_LINKS
+        aliceVision_image
+        aliceVision_system
+        aliceVision_camera
+        Boost::boost
+        Boost::json
+        ${CERES_LIBRARIES}
 )
 
-if(ALICEVISION_HAVE_OPENCV)
-  target_link_libraries(aliceVision_calibration PUBLIC ${OpenCV_LIBS})
-endif()
-
-if(ALICEVISION_HAVE_CCTAG)
-  target_link_libraries(aliceVision_calibration PRIVATE CCTag::CCTag)
-endif()
-
-
-alicevision_add_test(distortioncalibration_test.cpp   NAME "calibration_distortion"    LINKS aliceVision_calibration aliceVision_sfm aliceVision_system)
+# Unit tests
+alicevision_add_test(checkerDetector_test.cpp NAME "calibration_checkerDetector" LINKS aliceVision_calibration aliceVision_image)
+alicevision_add_test(checkerDetector_io_test.cpp NAME "calibration_checkerDetectorIO" LINKS aliceVision_calibration aliceVision_numeric Boost::json)
+alicevision_add_test(distortionEstimationPoint_test.cpp NAME "calibration_distortionEstimationPoint" LINKS aliceVision_calibration aliceVision_camera aliceVision_numeric)
+alicevision_add_test(distortionEstimationLine_test.cpp NAME "calibration_distortionEstimationLine" LINKS aliceVision_calibration aliceVision_camera aliceVision_numeric)
+alicevision_add_test(distortionEstimationGeometry_test.cpp NAME "calibration_distortionEstimationGeometry" LINKS aliceVision_calibration aliceVision_camera aliceVision_numeric)

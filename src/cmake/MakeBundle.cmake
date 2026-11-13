@@ -1,155 +1,483 @@
-cmake_minimum_required(VERSION 3.3)
+cmake_minimum_required(VERSION 3.30)
+
 # Perform bundle fixup on all executables of an install directory
 # and generates a standalone bundle with all required runtime dependencies.
 #
-# This scripts accepts the following parameters:
-#   - CMAKE_INSTALL_PREFIX: install target path
-#   - BUNDLE_INSTALL_PREFIX: bundle installation path
-#   - BUNDLE_LIBS_PATHS: additional paths (colon separated) to look for runtime dependencies
+# This script accepts the following parameters (pass via -D on the cmake -P command line):
+#   - CMAKE_INSTALL_PREFIX      : install target path (required)
+#   - BUNDLE_INSTALL_PREFIX     : bundle installation path (required)
+#   - BUNDLE_LIBS_PATHS         : additional paths (semicolon-separated) to look for runtime dependencies
+#   - BUNDLE_EXTRA_LIBS         : runtime libraries (semicolon-separated paths) to bundle although no bundled
+#                                 binary depends on them, for software built against the bundle (optional)
+#   - BUNDLE_PYTHON_ROOT        : relocatable Python runtime to embed as <bundle>/python (optional)
+#   - BUNDLE_PYTHON_REFERENCE   : Python executable AliceVision was built with, checked against BUNDLE_PYTHON_ROOT (optional)
+#   - CMAKE_INSTALL_BINDIR      : relative bin dir  (default: bin)
+#   - CMAKE_INSTALL_LIBDIR      : relative lib dir  (default: lib)
+#   - CMAKE_INSTALL_INCLUDEDIR  : relative include dir (default: include)
+#   - CMAKE_INSTALL_DATADIR     : relative data dir (default: share)
 
-# Blacklist from AppImage: https://github.com/AppImage/AppImages/blob/master/excludelist
-set(LINUX_OS_LIB_BLACKLIST
-ld-linux
-ld-linux-x86-64
-libanl
-libBrokenLocale
-libcidn
-libcrypt
-libc
-libdl
-libm
-libmvec
-libnsl
-libnss_compat
-libnss_db
-libnss_dns
-libnss_files
-libnss_hesiod
-libnss_nisplus
-libnss_nis
-libpthread
-libresolv
-librt
-libthread_db
-libutil
-libstdc++
-libGL
-libdrm
-libglapi
-libX11
-libgio-2.0
-libasound
-libgdk_pixbuf-2.0
-libfontconfig
-libthai
-libfreetype
-libharfbuzz
-libcom_err
-libexpat
-libgcc_s
-libglib-2.0
-libgpg-error
-libICE
-libkeyutils
-libp11-kit
-libSM
-libusb-1.0
-libuuid
-libz
-libgobject-2.0
-libpangoft2-1.0
-libpangocairo-1.0
-libpango-1.0
-libgpg-error
-libjack
-    )
+# ─── Validate required parameters ────────────────────────────────────────────
 
-function(gp_resolve_item_override context item exepath dirs resolved_item_var resolved_var)
-  # avoid log flood for those system libraries with non-absolute path
-  if(item MATCHES "^(api-ms-win-)[^/]+dll")
-    # resolve item with fake absolute system path to keep them identified as system libs
-    # By doing this, fixup_bundle:
-    #   - won't complain about those libraries
-    #   - won't embed them in the bundle
-    set(${resolved_item_var} "$ENV{SystemRoot}/system/${item}" PARENT_SCOPE)
-    set(${resolved_var} TRUE PARENT_SCOPE)
-  endif()
-endfunction()
-
-if(UNIX)
-  function(gp_resolved_file_type_override resolved_file type_var)
-    # We would like to embed all non-blacklisted "system" libs,
-    # based on the AppImage blacklist.
-    if("${${type_var}}" STREQUAL "system")
-      get_filename_component(basename ${resolved_file} NAME_WE)
-      # message(STATUS "SYSTEM LIB: ${resolved_file} [${basename}]")
-      if(NOT basename IN_LIST LINUX_OS_LIB_BLACKLIST)
-        # message(STATUS "${resolved_file} [${basename}]: SYSTEM => EMBEDDED")
-        set(${type_var} "embedded" PARENT_SCOPE)
-      endif()
+foreach(_required_var CMAKE_INSTALL_PREFIX BUNDLE_INSTALL_PREFIX)
+    if(NOT ${_required_var})
+        message(FATAL_ERROR "MakeBundle.cmake: ${_required_var} is not set. "
+                            "Pass it with -D${_required_var}=<path>")
     endif()
-  endfunction()
+endforeach()
+
+# ─── Replicate GNUInstallDirs for -P script mode ──────────────────────────────
+# include(GNUInstallDirs) cannot resolve lib vs lib64 when invoked via cmake -P,
+# so we compute the FULL_ variants manually from whatever the caller passes in.
+
+if(NOT CMAKE_INSTALL_BINDIR)
+    set(CMAKE_INSTALL_BINDIR "bin")
 endif()
 
+if(NOT CMAKE_INSTALL_LIBDIR)
+    # Attempt to auto-detect lib64 (matches GNUInstallDirs heuristic)
+    if(EXISTS "/etc/debian_version")
+        # Debian/Ubuntu multiarch – keep plain lib; the actual multiarch tuple
+        # would need more work, but lib is the safe default.
+        set(CMAKE_INSTALL_LIBDIR "lib")
+    elseif(CMAKE_SIZEOF_VOID_P EQUAL 8 AND EXISTS "/usr/lib64")
+        set(CMAKE_INSTALL_LIBDIR "lib64")
+    else()
+        set(CMAKE_INSTALL_LIBDIR "lib")
+    endif()
+endif()
+
+if(NOT CMAKE_INSTALL_INCLUDEDIR)
+    set(CMAKE_INSTALL_INCLUDEDIR "include")
+endif()
+
+if(NOT CMAKE_INSTALL_DATADIR)
+    set(CMAKE_INSTALL_DATADIR "share")
+endif()
+
+# Build absolute paths
+if(NOT CMAKE_INSTALL_FULL_BINDIR)
+    set(CMAKE_INSTALL_FULL_BINDIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}")
+endif()
+if(NOT CMAKE_INSTALL_FULL_LIBDIR)
+    set(CMAKE_INSTALL_FULL_LIBDIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
+endif()
+if(NOT CMAKE_INSTALL_FULL_INCLUDEDIR)
+    set(CMAKE_INSTALL_FULL_INCLUDEDIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}")
+endif()
+if(NOT CMAKE_INSTALL_FULL_DATADIR)
+    set(CMAKE_INSTALL_FULL_DATADIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}")
+endif()
+
+# ─── Blacklist (AppImage excludelist) ────────────────────────────────────────
+# https://github.com/AppImage/AppImages/blob/master/excludelist
+
+set(LINUX_OS_LIB_BLACKLIST
+    ld-linux
+    ld-linux-x86-64
+    libanl
+    libBrokenLocale
+    libcidn
+    libcrypt
+    libc
+    libdl
+    libm
+    libmvec
+    libnsl
+    libnss_compat
+    libnss_db
+    libnss_dns
+    libnss_files
+    libnss_hesiod
+    libnss_nisplus
+    libnss_nis
+    libpthread
+    libresolv
+    librt
+    libthread_db
+    libutil
+    libstdc++
+    libGL
+    libdrm
+    libglapi
+    libX11
+    libgio-2.0
+    libasound
+    libgdk_pixbuf-2.0
+    libfontconfig
+    libthai
+    libfreetype
+    libharfbuzz
+    libcom_err
+    libexpat
+    libgcc_s
+    libglib-2.0
+    libgpg-error
+    libICE
+    libkeyutils
+    libp11-kit
+    libSM
+    libusb-1.0
+    libuuid
+    libz
+    libgobject-2.0
+    libpangoft2-1.0
+    libpangocairo-1.0
+    libpango-1.0
+    libjack
+)
+
+# ─── Windows exclusions ──────────────────────────────────────────────────────
+# DLLs that must never be embedded in the bundle:
+#   - api-ms-win-* / ext-ms-win-*: API sets resolved by the OS loader
+#   - CUDA runtime DLLs (cuBLAS, cuFFT, NPP, etc.): require CUDA to be installed
+#     on the target machine
+set(WINDOWS_DLL_EXCLUDE_REGEXES
+    "^api-ms-win-"
+    "^ext-ms-win-"
+    "^(cublas|cublaslt|cufft|curand|cusolver|cusparse|nvrtc|nvjitlink)[0-9_]*\\.dll$"
+    "^npp[a-z]+[0-9_]*\\.dll$"
+    "^cudart[0-9_]*\\.dll$"
+)
+
+# ─── Platform overrides ───────────────────────────────────────────────────────
+
+if(UNIX)
+    function(gp_resolved_file_type_override resolved_file type_var)
+        # Embed all "system" libs that are NOT on the AppImage blacklist.
+        if("${${type_var}}" STREQUAL "system")
+            get_filename_component(basename "${resolved_file}" NAME_WE)
+            if(NOT basename IN_LIST LINUX_OS_LIB_BLACKLIST)
+                set(${type_var} "embedded" PARENT_SCOPE)
+            endif()
+        endif()
+    endfunction()
+endif()
+
+# ─── Diagnostics ─────────────────────────────────────────────────────────────
+
 include(BundleUtilities)
-include(GNUInstallDirs)
 
-message(STATUS "Starting Bundle")
-message(STATUS "CMAKE_INSTALL_PREFIX: ${CMAKE_INSTALL_PREFIX}")
-message(STATUS "BUNDLE_INSTALL_PREFIX: ${BUNDLE_INSTALL_PREFIX}")
-message(STATUS "BUNDLE_LIBS_PATHS: ${BUNDLE_LIBS_PATHS}")
+message(STATUS "=== MakeBundle ===")
+message(STATUS "  CMAKE_INSTALL_PREFIX    : ${CMAKE_INSTALL_PREFIX}")
+message(STATUS "  BUNDLE_INSTALL_PREFIX   : ${BUNDLE_INSTALL_PREFIX}")
+message(STATUS "  CMAKE_INSTALL_BINDIR    : ${CMAKE_INSTALL_BINDIR}")
+message(STATUS "  CMAKE_INSTALL_LIBDIR    : ${CMAKE_INSTALL_LIBDIR}")
+message(STATUS "  CMAKE_INSTALL_INCLUDEDIR: ${CMAKE_INSTALL_INCLUDEDIR}")
+message(STATUS "  CMAKE_INSTALL_DATADIR   : ${CMAKE_INSTALL_DATADIR}")
+message(STATUS "  CMAKE_INSTALL_FULL_BINDIR  : ${CMAKE_INSTALL_FULL_BINDIR}")
+message(STATUS "  CMAKE_INSTALL_FULL_LIBDIR  : ${CMAKE_INSTALL_FULL_LIBDIR}")
+message(STATUS "  CMAKE_INSTALL_FULL_INCLUDEDIR : ${CMAKE_INSTALL_FULL_INCLUDEDIR}")
+message(STATUS "  CMAKE_INSTALL_FULL_DATADIR : ${CMAKE_INSTALL_FULL_DATADIR}")
+message(STATUS "  BUNDLE_LIBS_PATHS       : ${BUNDLE_LIBS_PATHS}")
+message(STATUS "  BUNDLE_EXTRA_LIBS       : ${BUNDLE_EXTRA_LIBS}")
+message(STATUS "  BUNDLE_PYTHON_ROOT      : ${BUNDLE_PYTHON_ROOT}")
+message(STATUS "  BUNDLE_PYTHON_REFERENCE : ${BUNDLE_PYTHON_REFERENCE}")
 
-message(STATUS "CMAKE_INSTALL_FULL_LIBDIR: ${CMAKE_INSTALL_FULL_LIBDIR}")
-message(STATUS "CMAKE_INSTALL_LIBDIR: ${CMAKE_INSTALL_LIBDIR}")
+# ─── Dependency lookup paths ─────────────────────────────────────────────────
 
-# Add installed runtime library folder to dependencies lookup path
-if(WIN32)  # installed next to binaries on Windows
+if(WIN32)
+    # On Windows, DLLs live next to the executables
     set(LIBS_LOOKUPS_PATHS "${CMAKE_INSTALL_FULL_BINDIR}")
-else()     # installed in library dir everywhere else
+else()
     set(LIBS_LOOKUPS_PATHS "${CMAKE_INSTALL_FULL_LIBDIR}")
-    # GNUInstallDirs is not able to resolve between lib and lib64 hen cmake is called as a sub-command line.
-    # As a workaround we always add a second path with "64" suffix, so it works in all cases.
-    # In some cases, that will be useless and point to a non-existing directory.
-    list(APPEND LIBS_LOOKUPS_PATHS ${CMAKE_INSTALL_FULL_LIBDIR}64)
+    # GNUInstallDirs cannot distinguish lib vs lib64 in -P mode;
+    # always probe the "64" variant as well (harmless if absent).
+    list(APPEND LIBS_LOOKUPS_PATHS "${CMAKE_INSTALL_FULL_LIBDIR}64")
 endif()
 
 if(BUNDLE_LIBS_PATHS)
-list(APPEND LIBS_LOOKUPS_PATHS ${BUNDLE_LIBS_PATHS})
+    list(APPEND LIBS_LOOKUPS_PATHS ${BUNDLE_LIBS_PATHS})
 endif()
-message(STATUS "LIBS_LOOKUPS_PATHS: ${LIBS_LOOKUPS_PATHS}")
+message(STATUS "  LIBS_LOOKUPS_PATHS      : ${LIBS_LOOKUPS_PATHS}")
 
-get_bundle_all_executables(${CMAKE_INSTALL_FULL_BINDIR} BUNDLE_APPS)
+# ─── Guard: bin dir must exist ───────────────────────────────────────────────
 
-file(COPY
-     ${CMAKE_INSTALL_FULL_BINDIR}
-     DESTINATION ${BUNDLE_INSTALL_PREFIX}
-     USE_SOURCE_PERMISSIONS)
+if(NOT EXISTS "${CMAKE_INSTALL_FULL_BINDIR}")
+    message(FATAL_ERROR "MakeBundle.cmake: bin directory does not exist: "
+                        "${CMAKE_INSTALL_FULL_BINDIR}")
+endif()
 
-file(COPY
-    ${CMAKE_INSTALL_FULL_DATADIR}
-    DESTINATION ${BUNDLE_INSTALL_PREFIX}
-    USE_SOURCE_PERMISSIONS
-    )
+# ─── Copy install tree into bundle ───────────────────────────────────────────
 
-# Get first bundled executable as reference app
-# fixup_bundle will automatically fixup all the others executable in the bundle
-get_bundle_all_executables(${BUNDLE_INSTALL_PREFIX} BUNDLE_APPS)
-list(GET BUNDLE_APPS 0 MAIN_APP)
-fixup_bundle(${MAIN_APP} "" "${LIBS_LOOKUPS_PATHS}")
+foreach(_dir
+        "${CMAKE_INSTALL_FULL_BINDIR}"
+        "${CMAKE_INSTALL_PREFIX}/lib"
+        "${CMAKE_INSTALL_PREFIX}/lib64"
+        "${CMAKE_INSTALL_FULL_INCLUDEDIR}"
+        "${CMAKE_INSTALL_FULL_DATADIR}")
+    if(EXISTS "${_dir}")
+        file(COPY "${_dir}"
+             DESTINATION "${BUNDLE_INSTALL_PREFIX}"
+             USE_SOURCE_PERMISSIONS)
+    else()
+        message(STATUS "  Skipping non-existent directory: ${_dir}")
+    endif()
+endforeach()
+
+# ─── Extra runtime libraries ─────────────────────────────────────────────────
+# Libraries that no bundled binary depends on, but that software built against the bundle needs
+# (e.g. Embree for QtAliceVision). They are copied next to the other runtime libraries, and their
+# own dependencies are resolved below like those of the bundled binaries.
+
+set(BUNDLE_EXTRA_LIBS_IN_BUNDLE "")
+foreach(_extra_lib IN LISTS BUNDLE_EXTRA_LIBS)
+    if(NOT EXISTS "${_extra_lib}")
+        message(FATAL_ERROR "MakeBundle.cmake: extra runtime library not found: ${_extra_lib}")
+    endif()
+    file(REAL_PATH "${_extra_lib}" _extra_lib_real)
+    get_filename_component(_extra_lib_name "${_extra_lib_real}" NAME)
+    message(STATUS "  Bundling extra runtime library: ${_extra_lib_real}")
+    if(WIN32)
+        set(_extra_lib_dest "${BUNDLE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}")
+        file(COPY "${_extra_lib_real}" DESTINATION "${_extra_lib_dest}")
+    else()
+        # Also copy its symlinks (libfoo.so -> libfoo.so.4 -> libfoo.so.4.4.1): the loader
+        # looks for the SONAME, not for the real file name
+        set(_extra_lib_dest "${BUNDLE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
+        get_filename_component(_extra_lib_dir "${_extra_lib_real}" DIRECTORY)
+        string(REGEX REPLACE "\\.so(\\.[0-9]+)*$" ".so" _extra_lib_base "${_extra_lib_name}")
+        file(GLOB _extra_lib_files "${_extra_lib_dir}/${_extra_lib_base}*")
+        file(COPY ${_extra_lib_files} DESTINATION "${_extra_lib_dest}" USE_SOURCE_PERMISSIONS)
+    endif()
+    list(APPEND BUNDLE_EXTRA_LIBS_IN_BUNDLE "${_extra_lib_dest}/${_extra_lib_name}")
+endforeach()
+
+# ─── Runtime dependencies ────────────────────────────────────────────────────
+
+if(WIN32)
+    # fixup_bundle is not used on Windows: it has nothing to patch there, and it runs
+    # dumpbin once per dependency of every binary (twice, with verify_app), which takes
+    # about an hour. GET_RUNTIME_DEPENDENCIES scans each binary only once.
+    if(POLICY CMP0207)
+        cmake_policy(SET CMP0207 NEW)
+    endif()
+
+    set(_bundle_bindir "${BUNDLE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}")
+    # Executables and DLLs in bin/, plus the Python bindings' extension modules in lib/
+    file(GLOB BUNDLE_APPS "${_bundle_bindir}/*.exe" "${_bundle_bindir}/*.dll")
+    file(GLOB_RECURSE _bundle_pyds "${BUNDLE_INSTALL_PREFIX}/lib/*.pyd")
+    list(APPEND BUNDLE_APPS ${_bundle_pyds})
+
+    if(NOT BUNDLE_APPS)
+        message(FATAL_ERROR "MakeBundle.cmake: no executables found under "
+                            "${BUNDLE_INSTALL_PREFIX}")
+    endif()
+    list(LENGTH BUNDLE_APPS _bundle_apps_count)
+    message(STATUS "  Scanning runtime dependencies of ${_bundle_apps_count} binaries")
+
+    file(GET_RUNTIME_DEPENDENCIES
+         EXECUTABLES ${BUNDLE_APPS}
+         DIRECTORIES ${LIBS_LOOKUPS_PATHS}
+         PRE_EXCLUDE_REGEXES ${WINDOWS_DLL_EXCLUDE_REGEXES}
+         # Kept although found in C:/Windows, to be reported below
+         POST_INCLUDE_REGEXES "/libomp140[^/]*\\.dll$"
+         POST_EXCLUDE_REGEXES "^[A-Za-z]:/[Ww][Ii][Nn][Dd][Oo][Ww][Ss]/"
+         RESOLVED_DEPENDENCIES_VAR _resolved_deps
+         UNRESOLVED_DEPENDENCIES_VAR _unresolved_deps
+         CONFLICTING_DEPENDENCIES_PREFIX _conflicting_deps)
+
+    # Visual Studio's LLVM OpenMP runtime: vc_redist does not install it and it cannot be redistributed
+    # (Visual Studio only ships it in its debug_nonredist folder). AliceVision links libomp.dll instead,
+    # built by the llvm-openmp vcpkg port (see the OpenMP section of src/CMakeLists.txt).
+    set(_vs_openmp_deps ${_resolved_deps} ${_unresolved_deps})
+    list(FILTER _vs_openmp_deps INCLUDE REGEX "(^|/)libomp140[^/]*\\.dll$")
+    if(_vs_openmp_deps)
+        list(JOIN _vs_openmp_deps "\n    " _vs_openmp_deps)
+        message(FATAL_ERROR "MakeBundle.cmake: binaries depend on the Visual Studio OpenMP runtime, which cannot be "
+                            "redistributed (AliceVision must be configured with ALICEVISION_OPENMP_LIBRARY, "
+                            "from the llvm-openmp vcpkg port):\n    ${_vs_openmp_deps}")
+    endif()
+
+    if(_unresolved_deps)
+        list(JOIN _unresolved_deps "\n    " _unresolved_deps)
+        message(FATAL_ERROR "MakeBundle.cmake: unresolved runtime dependencies "
+                            "(add their location to ALICEVISION_BUNDLE_SEARCH_LIBS_PATHS):\n    ${_unresolved_deps}")
+    endif()
+
+    # All DLLs end up side by side in bin/, so a name resolved to several files
+    # can only be bundled once: keep the one already in the bundle, else the first found.
+    foreach(_name IN LISTS _conflicting_deps_FILENAMES)
+        if(EXISTS "${_bundle_bindir}/${_name}")
+            continue()
+        endif()
+        list(GET _conflicting_deps_${_name} 0 _chosen)
+        message(WARNING "MakeBundle.cmake: ${_name} resolved to several files, bundling ${_chosen}:\n"
+                        "    ${_conflicting_deps_${_name}}")
+        list(APPEND _resolved_deps "${_chosen}")
+    endforeach()
+
+    file(REAL_PATH "${_bundle_bindir}" _bundle_bindir_real)
+    set(_deps_to_copy "")
+    foreach(_dep IN LISTS _resolved_deps)
+        get_filename_component(_dep_dir "${_dep}" DIRECTORY)
+        file(REAL_PATH "${_dep_dir}" _dep_dir)
+        if(NOT _dep_dir STREQUAL _bundle_bindir_real)
+            list(APPEND _deps_to_copy "${_dep}")
+        endif()
+    endforeach()
+
+    list(LENGTH _deps_to_copy _deps_to_copy_count)
+    message(STATUS "  Copying ${_deps_to_copy_count} runtime dependencies into ${_bundle_bindir}")
+    if(_deps_to_copy)
+        file(COPY ${_deps_to_copy} DESTINATION "${_bundle_bindir}")
+    endif()
+else()
+    get_bundle_all_executables("${BUNDLE_INSTALL_PREFIX}" BUNDLE_APPS)
+
+    if(NOT BUNDLE_APPS)
+        message(FATAL_ERROR "MakeBundle.cmake: no executables found under "
+                            "${BUNDLE_INSTALL_PREFIX}")
+    endif()
+
+    # fixup_bundle uses the first app as anchor; it fixes up all others automatically.
+    # The extra libraries are not dependencies of any app: pass them explicitly, as plugins.
+    list(GET BUNDLE_APPS 0 MAIN_APP)
+    message(STATUS "  Main app for fixup_bundle: ${MAIN_APP}")
+    fixup_bundle("${MAIN_APP}" "${BUNDLE_EXTRA_LIBS_IN_BUNDLE}" "${LIBS_LOOKUPS_PATHS}")
+endif()
+
+# ─── Move stray libs that fixup_bundle dropped into bin/ back into lib/ ──────
 
 if(UNIX)
-    file(GLOB _LIBS_TO_MOVE "${BUNDLE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/lib*.so*")
-    file(COPY
-        ${_LIBS_TO_MOVE}
-        DESTINATION ${BUNDLE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}
-        USE_SOURCE_PERMISSIONS
-        FILES_MATCHING PATTERN "lib*.so*"
-        )
-    file(REMOVE
-        ${_LIBS_TO_MOVE}
-        )
-    
+    set(_bundle_bindir "${BUNDLE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}")
+    set(_bundle_libdir "${BUNDLE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
+
+    file(GLOB _LIBS_TO_MOVE "${_bundle_bindir}/lib*.so*")
+    if(_LIBS_TO_MOVE)
+        message(STATUS "  Moving ${CMAKE_LIST_LENGTH} stray libs from bin/ to lib/")
+        file(COPY ${_LIBS_TO_MOVE}
+             DESTINATION "${_bundle_libdir}"
+             USE_SOURCE_PERMISSIONS)
+        file(REMOVE ${_LIBS_TO_MOVE})
+    endif()
 endif()
 
-message(STATUS "Bundle done: ${BUNDLE_INSTALL_PREFIX}")
+# ─── Copy USD plugin directory from lookup paths ─────────────────────────────
+# plugInfo.json and plugin subdirs must sit alongside the USD libraries for the USD resolver: USD looks for them
+# in <dir of libusd_plug>/usd, i.e. the bin dir on Windows and the lib dir on Linux. Without them, USD aborts when
+# loading a plugin ("Failed to find the plugInfo.json file that declares the plugin for ArDefaultResolver").
 
+if (WIN32)
+    set(_bundle_usd_dest "${BUNDLE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}")
+else()
+    set(_bundle_usd_dest "${BUNDLE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
+endif()
+foreach(_lookup_path IN LISTS BUNDLE_LIBS_PATHS)
+    set(_usd_src "${_lookup_path}/usd")
+    if(EXISTS "${_usd_src}")
+        message(STATUS "  Copying USD plugin dir: ${_usd_src} -> ${_bundle_usd_dest}/usd")
+        file(COPY "${_usd_src}" DESTINATION "${_bundle_usd_dest}" USE_SOURCE_PERMISSIONS)
+        break()
+    endif()
+endforeach()
+
+# ─── Embed the Python runtime ────────────────────────────────────────────────
+# Copied after fixup_bundle, which must not rewrite the interpreter and its modules.
+# The runtime must be the one AliceVision was built against (same build, not only same version).
+
+if(BUNDLE_PYTHON_ROOT)
+    if(WIN32)
+        set(_python_exe_rel "python.exe")
+    else()
+        set(_python_exe_rel "bin/python3")
+    endif()
+    if(NOT EXISTS "${BUNDLE_PYTHON_ROOT}/${_python_exe_rel}")
+        message(FATAL_ERROR "MakeBundle.cmake: no interpreter in BUNDLE_PYTHON_ROOT: "
+                            "${BUNDLE_PYTHON_ROOT}/${_python_exe_rel}")
+    endif()
+
+    set(_python_check "import sys, importlib.util; print(sys.version); print(sys.base_prefix); print(importlib.util.find_spec('numpy') is None)")
+
+    if(BUNDLE_PYTHON_REFERENCE)
+        execute_process(COMMAND "${BUNDLE_PYTHON_REFERENCE}" -c "${_python_check}"
+                        OUTPUT_VARIABLE _ref_out OUTPUT_STRIP_TRAILING_WHITESPACE
+                        COMMAND_ERROR_IS_FATAL ANY)
+        string(REPLACE "\n" ";" _ref_out "${_ref_out}")
+        list(GET _ref_out 0 _ref_version)
+        list(GET _ref_out 1 _ref_base_prefix)
+        file(REAL_PATH "${_ref_base_prefix}" _ref_base_prefix)
+        file(REAL_PATH "${BUNDLE_PYTHON_ROOT}" _bundle_python_root)
+        if(NOT _ref_base_prefix STREQUAL _bundle_python_root)
+            message(FATAL_ERROR "MakeBundle.cmake: AliceVision was built against the Python in ${_ref_base_prefix} "
+                                "(${BUNDLE_PYTHON_REFERENCE}), but the bundle would embed ${_bundle_python_root}")
+        endif()
+    endif()
+
+    message(STATUS "  Copying Python runtime: ${BUNDLE_PYTHON_ROOT} -> ${BUNDLE_INSTALL_PREFIX}/python")
+    file(REMOVE_RECURSE "${BUNDLE_INSTALL_PREFIX}/python")
+    file(MAKE_DIRECTORY "${BUNDLE_INSTALL_PREFIX}/python")
+    file(COPY "${BUNDLE_PYTHON_ROOT}/"
+         DESTINATION "${BUNDLE_INSTALL_PREFIX}/python"
+         USE_SOURCE_PERMISSIONS
+         PATTERN "__pycache__" EXCLUDE
+         PATTERN "*.pdb" EXCLUDE)
+
+    # The relocated copy must start in isolated mode, and the runtime itself must be pristine
+    # (packages belong in the build venv; they are reinstalled in the bundle below).
+    set(_bundle_python "${BUNDLE_INSTALL_PREFIX}/python/${_python_exe_rel}")
+    execute_process(COMMAND "${_bundle_python}" -I -B -c "${_python_check}"
+                    OUTPUT_VARIABLE _bundle_out OUTPUT_STRIP_TRAILING_WHITESPACE
+                    COMMAND_ERROR_IS_FATAL ANY)
+    string(REPLACE "\n" ";" _bundle_out "${_bundle_out}")
+    list(GET _bundle_out 0 _bundle_version)
+    list(GET _bundle_out 2 _bundle_no_numpy)
+    message(STATUS "  Bundled Python: ${_bundle_version}")
+    if(BUNDLE_PYTHON_REFERENCE AND NOT _bundle_version STREQUAL _ref_version)
+        message(FATAL_ERROR "MakeBundle.cmake: bundled Python '${_bundle_version}' differs from the build Python '${_ref_version}'")
+    endif()
+    if(NOT _bundle_no_numpy STREQUAL "True")
+        message(FATAL_ERROR "MakeBundle.cmake: the Python runtime ${BUNDLE_PYTHON_ROOT} is not pristine (numpy is installed in it)")
+    endif()
+
+    # Reinstall the build venv's packages in the bundled runtime, at the exact versions
+    # AliceVision was built against (the venv itself is not relocatable).
+    if(BUNDLE_PYTHON_REFERENCE)
+        set(_pip_freeze -I -m pip freeze --exclude-editable --disable-pip-version-check)
+        execute_process(COMMAND "${BUNDLE_PYTHON_REFERENCE}" ${_pip_freeze}
+                        OUTPUT_VARIABLE _ref_packages OUTPUT_STRIP_TRAILING_WHITESPACE
+                        COMMAND_ERROR_IS_FATAL ANY)
+        string(REGEX REPLACE "\r?\n" ";" _ref_packages "${_ref_packages}")
+        foreach(_package IN LISTS _ref_packages)
+            if(NOT _package MATCHES "^[A-Za-z0-9._-]+(\\[[^]]*\\])?==[^ ]+$")
+                message(FATAL_ERROR "MakeBundle.cmake: cannot reinstall '${_package}' from the build venv "
+                                    "${BUNDLE_PYTHON_REFERENCE} in the bundle (not a released package)")
+            endif()
+        endforeach()
+
+        if(_ref_packages)
+            list(JOIN _ref_packages " " _ref_packages_str)
+            message(STATUS "  Installing build venv packages in the bundled Python: ${_ref_packages_str}")
+            execute_process(COMMAND "${_bundle_python}" -I -m pip install
+                                    --disable-pip-version-check --no-warn-script-location
+                                    --no-deps --no-compile ${_ref_packages}
+                            COMMAND_ERROR_IS_FATAL ANY)
+        endif()
+
+        execute_process(COMMAND "${_bundle_python}" ${_pip_freeze}
+                        OUTPUT_VARIABLE _bundle_packages OUTPUT_STRIP_TRAILING_WHITESPACE
+                        COMMAND_ERROR_IS_FATAL ANY)
+        string(REGEX REPLACE "\r?\n" ";" _bundle_packages "${_bundle_packages}")
+        if(NOT _bundle_packages STREQUAL _ref_packages)
+            message(FATAL_ERROR "MakeBundle.cmake: packages of the bundled Python (${_bundle_packages}) "
+                                "differ from the build venv's (${_ref_packages})")
+        endif()
+    endif()
+
+    # On Windows the Python DLL is also resolved into bin/ for the extension modules:
+    # it must be the very same file as the interpreter's.
+    if(WIN32)
+        file(GLOB _bundle_python_dlls RELATIVE "${BUNDLE_INSTALL_PREFIX}/python" "${BUNDLE_INSTALL_PREFIX}/python/python3*.dll")
+        foreach(_dll IN LISTS _bundle_python_dlls)
+            set(_bin_dll "${BUNDLE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/${_dll}")
+            if(EXISTS "${_bin_dll}")
+                file(SHA256 "${_bin_dll}" _bin_dll_hash)
+                file(SHA256 "${BUNDLE_INSTALL_PREFIX}/python/${_dll}" _python_dll_hash)
+                if(NOT _bin_dll_hash STREQUAL _python_dll_hash)
+                    message(FATAL_ERROR "MakeBundle.cmake: ${_bin_dll} differs from the bundled interpreter's ${_dll}")
+                endif()
+            endif()
+        endforeach()
+    endif()
+endif()
+
+message(STATUS "=== Bundle done: ${BUNDLE_INSTALL_PREFIX} ===")

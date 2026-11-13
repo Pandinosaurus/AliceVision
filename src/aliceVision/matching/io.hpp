@@ -7,13 +7,12 @@
 
 #pragma once
 
-#include <aliceVision/matching/IndMatch.hpp>
+#include <aliceVision/matching/MatchesCollections.hpp>
 
 #include <string>
 
 namespace aliceVision {
 namespace matching {
-
 
 /**
  * @brief Load a match file.
@@ -87,6 +86,8 @@ bool Save(const PairwiseMatches& matches,
           const std::string& extension,
           bool matchFilePerImage,
           const std::string& prefix = "");
+
+void displayStats(const PairwiseMatches& matches);
 
 }  // namespace matching
 }  // namespace aliceVision

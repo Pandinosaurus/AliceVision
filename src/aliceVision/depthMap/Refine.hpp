@@ -7,75 +7,112 @@
 #pragma once
 
 #include <aliceVision/mvsUtils/MultiViewParams.hpp>
-#include <aliceVision/mvsData/StaticVector.hpp>
-#include <aliceVision/depthMap/DepthSimMap.hpp>
+#include <aliceVision/mvsUtils/TileParams.hpp>
+#include <aliceVision/depthMap/Tile.hpp>
+#include <aliceVision/depthMapCommon/RefineParams.hpp>
+#include <aliceVision/depthMap/cuda/host/memory.hpp>
+#include <aliceVision/depthMap/cuda/planeSweeping/similarity.hpp>
+
+#include <string>
 
 namespace aliceVision {
 namespace depthMap {
 
-struct RefineParams;
-class PlaneSweepingCuda;
-
 /**
- * @brief Depth Map Estimation Refine
+ * @class Depth map estimation Refine
+ * @brief Manages the calculation of the Refine step.
  */
 class Refine
 {
-public:
-    Refine(const RefineParams& refineParams, const mvsUtils::MultiViewParams& mp, PlaneSweepingCuda& cps, int rc);
-    ~Refine();
+  public:
+    /**
+     * @brief Refine constructor.
+     * @param[in] mp the multi-view parameters
+     * @param[in] tileParams tile workflow parameters
+     * @param[in] refineParams the Refine parameters
+     * @param[in] stream the stream for gpu execution
+     */
+    Refine(const mvsUtils::MultiViewParams& mp, const mvsUtils::TileParams& tileParams, const depthMapCommon::RefineParams& refineParams, cudaStream_t stream);
 
-    bool refineRc(const DepthSimMap& sgmDepthSimMap);
+    // no default constructor
+    Refine() = delete;
 
-    const StaticVector<int>& getTCams() const { return _tCams; }
-    const DepthSimMap& getDepthSimMap() const { return _depthSimMap; }
+    // default destructor
+    ~Refine() = default;
 
-private:
-
-    const RefineParams& _refineParams;
-    const mvsUtils::MultiViewParams& _mp;
-    PlaneSweepingCuda& _cps;
-
-    const int _rc;            // refine R camera index
-    StaticVector<int> _tCams; // refine T camera indexes, compute in the constructor
-    DepthSimMap _depthSimMap; // refined, fused and optimized depth map
+    // final depth/similarity map getter
+    inline const CudaDeviceMemoryPitched<float2, 2>& getDeviceDepthSimMap() const { return _optimizedDepthSimMap_dmp; }
 
     /**
-     * @brief Upscale the given SGM depth/sim map.
-     * @param[in] sgmDepthSimMap the given SGM depth/sim map
-     * @param[in,out] out_depthSimMapUpscaled the given output depth/sim map
-     * @note Dimensions of the given output depth/sim map are used to compute the scale factor.
+     * @brief Get memory consumpyion in device memory.
+     * @return device memory consumpyion (in MB)
      */
-    void upscaleSgmDepthSimMap(const DepthSimMap& sgmDepthSimMap, DepthSimMap& out_depthSimMapUpscaled) const;
+    double getDeviceMemoryConsumption() const;
 
     /**
-     * @brief Filter masked pixels (alpha < 0.1) of the given depth/sim map.
-     * @param[in,out] out_depthSimMap the given depth/sim map
+     * @brief Get unpadded memory consumpyion in device memory.
+     * @return unpadded device memory consumpyion (in MB)
      */
-    void filterMaskedPixels(DepthSimMap& out_depthSimMap);
+    double getDeviceMemoryConsumptionUnpadded() const;
 
     /**
-     * @brief Refine the given depth/sim map with the given T camera.
-     * @param[in] tc the given T camera index
-     * @param[int,out] depthSimMap the given output refined depth/sim map
+     * @brief Refine for a single R camera the Semi-Global Matching depth/sim map.
+     * @param[in] tile The given tile for Refine computation
+     * @param[in] in_sgmDepthThicknessMap_dmp the SGM result depth/thickness map in device memory
+     * @param[in] in_sgmNormalMap_dmp the SGM result normal map in device memory (or empty)
      */
-    void refineDepthSimMapPerTc(int tc, DepthSimMap& depthSimMap) const;
+    void refineRc(const Tile& tile,
+                  const CudaDeviceMemoryPitched<float2, 2>& in_sgmDepthThicknessMap_dmp,
+                  const CudaDeviceMemoryPitched<float3, 2>& in_sgmNormalMap_dmp);
+
+  private:
+    // private methods
 
     /**
-     * @brief Refine and fuse the given depth/sim map.
-     * @param[in] depthSimMapSgmUpscale the given upscaled SGM depth sim/map
-     * @param[out] out_depthSimMapRefinedFused the given output refined and fused depth/sim map
+     * @brief Refine and fuse the given depth/sim map using volume strategy.
+     * @param[in] tile The given tile for Refine computation
      */
-    void refineAndFuseDepthSimMap(const DepthSimMap& depthSimMapSgmUpscale, DepthSimMap& out_depthSimMapRefinedFused) const;
+    void refineAndFuseDepthSimMap(const Tile& tile);
 
     /**
-     * @brief Optimize the given depth/sim maps.
-     * @param[in] depthSimMapSgmUpscale the given upscaled SGM depth/sim map
-     * @param[in] depthSimMapRefinedFused the given refined and fused depth/sim map
-     * @param[out] out_depthSimMapOptimized the given output optimized depth/sim map
+     * @brief Optimize the refined depth/sim maps.
+     * @param[in] tile The given tile for Refine computation
      */
-    void optimizeDepthSimMap(const DepthSimMap& depthSimMapSgmUpscale, const DepthSimMap& depthSimMapRefinedFused, DepthSimMap& out_depthSimMapOptimized) const;
+    void optimizeDepthSimMap(const Tile& tile);
+
+    /**
+     * @brief Compute and write the normal map from the input depth/sim map.
+     * @param[in] tile The given tile for Refine computation
+     * @param[in] in_depthSimMap_dmp the input depth/sim map in device memory
+     * @param[in] name the export filename
+     */
+    void computeAndWriteNormalMap(const Tile& tile, const CudaDeviceMemoryPitched<float2, 2>& in_depthSimMap_dmp, const std::string& name = "");
+
+    /**
+     * @brief Export volume cross alembic file and 9 points csv file.
+     * @param[in] tile The given tile for Refine computation
+     * @param[in] name the export filename
+     */
+    void exportVolumeInformation(const Tile& tile, const std::string& name) const;
+
+    // private members
+
+    const mvsUtils::MultiViewParams& _mp;     //< Multi-view parameters
+    const mvsUtils::TileParams& _tileParams;  //< tile workflow parameters
+    const depthMapCommon::RefineParams& _refineParams;        //< Refine parameters
+
+    // private members in device memory
+
+    CudaDeviceMemoryPitched<float2, 2> _sgmDepthPixSizeMap_dmp;    //< rc upscaled SGM depth/pixSize map
+    CudaDeviceMemoryPitched<float2, 2> _refinedDepthSimMap_dmp;    //< rc refined and fused depth/sim map
+    CudaDeviceMemoryPitched<float2, 2> _optimizedDepthSimMap_dmp;  //< rc optimized depth/sim map
+    CudaDeviceMemoryPitched<float3, 2> _sgmNormalMap_dmp;          //< rc upscaled SGM normal map (for experimentation purposes)
+    CudaDeviceMemoryPitched<float3, 2> _normalMap_dmp;             //< rc normal map (for debug / intermediate results purposes)
+    CudaDeviceMemoryPitched<TSimRefine, 3> _volumeRefineSim_dmp;   //< rc refine similarity volume
+    CudaDeviceMemoryPitched<float, 2> _optTmpDepthMap_dmp;         //< for color optimization: temporary depth map buffer
+    CudaDeviceMemoryPitched<float, 2> _optImgVariance_dmp;         //< for color optimization: image variance buffer
+    cudaStream_t _stream;                                          //< stream for gpu execution
 };
 
-} // namespace depthMap
-} // namespace aliceVision
+}  // namespace depthMap
+}  // namespace aliceVision

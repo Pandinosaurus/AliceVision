@@ -1,24 +1,51 @@
 # Headers
 set(tracks_files_headers
-  Track.hpp
-  TracksBuilder.hpp
-  tracksUtils.hpp
+    Track.hpp
+    TracksBuilder.hpp
+    TracksHandler.hpp
+    tracksUtils.hpp
+    trackIO.hpp
+    TracksMerger.hpp
 )
 
 # Sources
 set(tracks_files_sources
-  TracksBuilder.cpp
-  tracksUtils.cpp
+    TracksBuilder.cpp
+    TracksHandler.cpp
+    tracksUtils.cpp
+    trackIO.cpp
+    TracksMerger.cpp
 )
 
 alicevision_add_library(aliceVision_track
-  SOURCES ${tracks_files_headers} ${tracks_files_sources}
-  PUBLIC_LINKS
-    aliceVision_feature
-    aliceVision_matching
-    aliceVision_stl
-    ${LEMON_LIBRARY}
+    SOURCES ${tracks_files_headers} ${tracks_files_sources}
+    PUBLIC_LINKS
+        aliceVision_feature
+        aliceVision_matching
+        aliceVision_stl
+        Boost::json
+    PRIVATE_LINKS
+        LEMON::lemon 
 )
 
 # Unit tests
 alicevision_add_test(track_test.cpp NAME "track" LINKS aliceVision_track)
+alicevision_add_test(tracksBuilder_test.cpp NAME "track_tracksBuilder" LINKS aliceVision_track aliceVision_feature)
+alicevision_add_test(tracksUtils_test.cpp NAME "track_tracksUtils" LINKS aliceVision_track aliceVision_sfmData aliceVision_camera)
+alicevision_add_test(tracksMerger_test.cpp NAME "track_tracksMerger" LINKS aliceVision_track)
+alicevision_add_test(trackIO_test.cpp NAME "track_trackIO" LINKS aliceVision_track)
+
+# SWIG Binding
+if (ALICEVISION_BUILD_SWIG_BINDING)
+    alicevision_swig_add_library(track
+        SOURCES track.i
+        PUBLIC_LINKS
+            aliceVision_track
+            ${Python3_LIBRARIES}
+        PRIVATE_INCLUDE_DIRS
+            ../include
+            ${ALICEVISION_ROOT}/include
+            ${Python3_INCLUDE_DIRS}
+            ${Python3_NumPy_INCLUDE_DIRS}
+    )
+endif()

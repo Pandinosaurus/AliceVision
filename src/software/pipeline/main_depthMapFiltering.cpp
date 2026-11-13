@@ -10,16 +10,21 @@
 #include <aliceVision/mvsData/StaticVector.hpp>
 #include <aliceVision/mvsUtils/common.hpp>
 #include <aliceVision/mvsUtils/MultiViewParams.hpp>
-#include <aliceVision/system/cmdline.hpp>
+#include <aliceVision/cmdline/cmdline.hpp>
 #include <aliceVision/system/Logger.hpp>
 #include <aliceVision/system/main.hpp>
 #include <aliceVision/system/Timer.hpp>
 
-#include <aliceVision/depthMap/depthMap.hpp>
+#if ALICEVISION_IS_DEFINED(ALICEVISION_DEPTHMAP_BACKEND_CUDA)
 #include <aliceVision/depthMap/computeOnMultiGPUs.hpp>
+#include <aliceVision/depthMap/NormalMapEstimator.hpp>
+#endif
+#if ALICEVISION_IS_DEFINED(ALICEVISION_DEPTHMAP_BACKEND_SYCL)
+#include <aliceVision/depthMap_sycl/computeOnMultiDevices.hpp>
+#include <aliceVision/depthMap_sycl/NormalMapEstimator.hpp>
+#endif
 
 #include <boost/program_options.hpp>
-#include <boost/filesystem.hpp>
 
 // These constants define the current software version.
 // They must be updated when the command line is changed.
@@ -34,7 +39,6 @@ int aliceVision_main(int argc, char* argv[])
 {
     system::Timer timer;
 
-    std::string verboseLevel = system::EVerboseLevel_enumToString(system::Logger::getDefaultVerboseLevel());
     std::string sfmDataFilename;
     std::string depthMapsFolder;
     std::string outputFolder;
@@ -55,93 +59,70 @@ int aliceVision_main(int argc, char* argv[])
     int nNearestCams = 10;
     bool computeNormalMaps = false;
 
-    po::options_description allParams("AliceVision depthMapFiltering\n"
-                                      "Filter depth map to remove values that are not consistent with other depth maps");
+    // for testing both cuda and sycl
+#if !(ALICEVISION_IS_DEFINED(ALICEVISION_DEPTHMAP_BACKEND_CUDA))
+    int backend = 1;
+#else
+    int backend = 0;
+#endif
 
+    // clang-format off
     po::options_description requiredParams("Required parameters");
     requiredParams.add_options()
         ("input,i", po::value<std::string>(&sfmDataFilename)->required(),
-            "SfMData file.")
+         "SfMData file.")
         ("depthMapsFolder", po::value<std::string>(&depthMapsFolder)->required(),
-            "Input depth map folder.")
+         "Input depth map folder.")
         ("output,o", po::value<std::string>(&outputFolder)->required(),
-            "Output folder for filtered depth maps.");
+         "Output folder for filtered depth maps.");
 
     po::options_description optionalParams("Optional parameters");
     optionalParams.add_options()
         ("rangeStart", po::value<int>(&rangeStart)->default_value(rangeStart),
-            "Compute only a sub-range of images from index rangeStart to rangeStart+rangeSize.")
+         "Compute only a sub-range of images from index rangeStart to rangeStart+rangeSize.")
         ("rangeSize", po::value<int>(&rangeSize)->default_value(rangeSize),
-            "Compute only a sub-range of N images (N=rangeSize).")
+         "Compute only a sub-range of N images (N=rangeSize).")
         ("minViewAngle", po::value<float>(&minViewAngle)->default_value(minViewAngle),
-            "minimum angle between two views.")
+         "Minimum angle between two views.")
         ("maxViewAngle", po::value<float>(&maxViewAngle)->default_value(maxViewAngle),
-            "maximum angle between two views.")
+         "Maximum angle between two views.")
         ("minNumOfConsistentCams", po::value<int>(&minNumOfConsistentCams)->default_value(minNumOfConsistentCams),
-            "Minimal number of consistent cameras to consider the pixel.")
+         "Minimal number of consistent cameras to consider the pixel.")
         ("minNumOfConsistentCamsWithLowSimilarity", po::value<int>(&minNumOfConsistentCamsWithLowSimilarity)->default_value(minNumOfConsistentCamsWithLowSimilarity),
-            "Minimal number of consistent cameras to consider the pixel when the similarity is weak or ambiguous.")
+         "Minimal number of consistent cameras to consider the pixel when the similarity is weak or ambiguous.")
         ("pixToleranceFactor", po::value<float>(&pixToleranceFactor)->default_value(pixToleranceFactor),
-            "Filtering tolerance size factor (in px).")
+         "Filtering tolerance size factor (in px).")
         ("pixSizeBall", po::value<int>(&pixSizeBall)->default_value(pixSizeBall),
-            "Filter ball size (in px).")
+         "Filter ball size (in px).")
         ("pixSizeBallWithLowSimilarity", po::value<int>(&pixSizeBallWithLowSimilarity)->default_value(pixSizeBallWithLowSimilarity),
-            "Filter ball size (in px) when the similarity is weak or ambiguous.")
+         "Filter ball size (in px) when the similarity is weak or ambiguous.")
         ("nNearestCams", po::value<int>(&nNearestCams)->default_value(nNearestCams),
-            "Number of nearest cameras.")
+         "Number of nearest cameras.")
         ("computeNormalMaps", po::value<bool>(&computeNormalMaps)->default_value(computeNormalMaps),
-            "Compute normal maps per depth map");
+         "Compute normal maps per depth map.")
+         ("backend", po::value<int>(&backend)->default_value(backend),
+         "Which backend to use. 0 selects CUDA, 1 selects SYCL. Using a backend requires that it was enabled at compiletime");;
+    // clang-format on
 
-    po::options_description logParams("Log parameters");
-    logParams.add_options()
-      ("verboseLevel,v", po::value<std::string>(&verboseLevel)->default_value(verboseLevel),
-        "verbosity level (fatal, error, warning, info, debug, trace).");
-
-    allParams.add(requiredParams).add(optionalParams).add(logParams);
-
-    po::variables_map vm;
-
-    try
+    CmdLine cmdline("This program filters depth maps to remove values that are not consistent with other depth maps.\n"
+                    "AliceVision depthMapFiltering");
+    cmdline.add(requiredParams);
+    cmdline.add(optionalParams);
+    if (!cmdline.execute(argc, argv))
     {
-      po::store(po::parse_command_line(argc, argv, allParams), vm);
-
-      if(vm.count("help") || (argc == 1))
-      {
-        ALICEVISION_COUT(allParams);
-        return EXIT_SUCCESS;
-      }
-
-      po::notify(vm);
+        return EXIT_FAILURE;
     }
-    catch(boost::program_options::required_option& e)
-    {
-      ALICEVISION_CERR("ERROR: " << e.what() << std::endl);
-      ALICEVISION_COUT("Usage:\n\n" << allParams);
-      return EXIT_FAILURE;
-    }
-    catch(boost::program_options::error& e)
-    {
-      ALICEVISION_CERR("ERROR: " << e.what() << std::endl);
-      ALICEVISION_COUT("Usage:\n\n" << allParams);
-      return EXIT_FAILURE;
-    }
-
-    ALICEVISION_COUT("Program called with the following parameters:");
-    ALICEVISION_COUT(vm);
-
-    // set verbose level
-    system::Logger::get()->setLogLevel(verboseLevel);
 
     // read the input SfM scene
     sfmData::SfMData sfmData;
-    if(!sfmDataIO::Load(sfmData, sfmDataFilename, sfmDataIO::ESfMData::ALL))
+    if (!sfmDataIO::load(sfmData, sfmDataFilename, sfmDataIO::ESfMData::ALL))
     {
-      ALICEVISION_LOG_ERROR("The input SfMData file '" << sfmDataFilename << "' cannot be read.");
-      return EXIT_FAILURE;
+        ALICEVISION_LOG_ERROR("The input SfMData file '" << sfmDataFilename << "' cannot be read.");
+        return EXIT_FAILURE;
     }
 
     // initialization
-    mvsUtils::MultiViewParams mp(sfmData, "", depthMapsFolder, outputFolder, "", true);
+    mvsUtils::MultiViewParams mp(sfmData, "", depthMapsFolder, outputFolder, mvsUtils::EFileType::depthMap);
 
     mp.setMinViewAngle(minViewAngle);
     mp.setMaxViewAngle(maxViewAngle);
@@ -149,21 +130,21 @@ int aliceVision_main(int argc, char* argv[])
     std::vector<int> cams;
     cams.reserve(mp.ncams);
 
-    if(rangeSize == -1)
+    if (rangeSize == -1)
     {
-        for(int rc = 0; rc < mp.ncams; rc++) // process all cameras
+        for (int rc = 0; rc < mp.ncams; rc++)  // process all cameras
             cams.push_back(rc);
     }
     else
     {
-        if(rangeStart < 0)
+        if (rangeStart < 0)
         {
             ALICEVISION_LOG_ERROR("invalid subrange of cameras to process.");
             return EXIT_FAILURE;
         }
-        for(int rc = rangeStart; rc < std::min(rangeStart + rangeSize, mp.ncams); ++rc)
+        for (int rc = rangeStart; rc < std::min(rangeStart + rangeSize, mp.ncams); ++rc)
             cams.push_back(rc);
-        if(cams.empty())
+        if (cams.empty())
         {
             ALICEVISION_LOG_INFO("No camera to process.");
             return EXIT_SUCCESS;
@@ -181,7 +162,29 @@ int aliceVision_main(int argc, char* argv[])
     if (computeNormalMaps)
     {
         int nbGPUs = 0;
-        depthMap::computeOnMultiGPUs(mp, cams, depthMap::computeNormalMaps, nbGPUs);
+
+        // estimate normal maps
+        switch (backend)
+        {
+#if ALICEVISION_IS_DEFINED(ALICEVISION_DEPTHMAP_BACKEND_CUDA)
+            case 0:
+            {
+                depthMap::NormalMapEstimator normalMapEstimator(mp);
+                depthMap::computeOnMultiGPUs(cams, normalMapEstimator, nbGPUs);
+                break;
+            }
+#endif
+#if ALICEVISION_IS_DEFINED(ALICEVISION_DEPTHMAP_BACKEND_SYCL)
+            case 1:
+            {
+                depthMap_sycl::NormalMapEstimator normalMapEstimator(mp);
+                depthMap_sycl::computeOnMultiDevices(cams, normalMapEstimator, nbGPUs);
+                break;
+            }
+#endif
+            default:
+                ALICEVISION_THROW_ERROR("Invalid/unsupported backend selected for computation");
+        }
     }
 
     ALICEVISION_LOG_INFO("Task done in (s): " + std::to_string(timer.elapsed()));

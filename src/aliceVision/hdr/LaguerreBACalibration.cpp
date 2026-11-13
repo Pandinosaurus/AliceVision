@@ -7,7 +7,6 @@
 #include "LaguerreBACalibration.hpp"
 #include "sampling.hpp"
 
-#include <aliceVision/alicevision_omp.hpp>
 #include <aliceVision/system/Logger.hpp>
 
 #include <Eigen/Dense>
@@ -15,9 +14,7 @@
 #include <ceres/ceres.h>
 
 #include <utility>
-#include <iostream>
 #include <cassert>
-#include <numeric>
 
 namespace aliceVision {
 namespace hdr {
@@ -72,12 +69,11 @@ double d_laguerreFunction_d_x(double a, double x)
 
 class HdrResidualAnalytic : public ceres::SizedCostFunction<2, 1, 1>
 {
-public:
+  public:
     HdrResidualAnalytic(double a, double b)
-        : _colorA(a)
-        , _colorB(b)
-    {
-    }
+      : _colorA(a),
+        _colorB(b)
+    {}
 
     bool Evaluate(double const* const* parameters, double* residuals, double** jacobians) const override
     {
@@ -92,26 +88,26 @@ public:
 
         residuals[0] = errorCost_1;
         residuals[1] = errorCost_2;
- 
-        if(jacobians == nullptr)
+
+        if (jacobians == nullptr)
         {
             return true;
         }
 
-        if(jacobians[0] != nullptr)
+        if (jacobians[0] != nullptr)
         {
-            double d_errorCost_1_d_laguerre_param = d_laguerreFunction_d_param(laguerre_param, a) +
-                                                    d_laguerreFunction_d_x(laguerre_param, a) * ratio_expB_over_expA *
-                                                        -d_laguerreFunction_d_param(-laguerre_param, _colorA);
-            double d_errorCost_2_d_laguerre_param = d_laguerreFunction_d_param(laguerre_param, b) +
-                                                    d_laguerreFunction_d_x(laguerre_param, b) / ratio_expB_over_expA *
-                                                        -d_laguerreFunction_d_param(-laguerre_param, _colorB);
+            double d_errorCost_1_d_laguerre_param =
+              d_laguerreFunction_d_param(laguerre_param, a) +
+              d_laguerreFunction_d_x(laguerre_param, a) * ratio_expB_over_expA * -d_laguerreFunction_d_param(-laguerre_param, _colorA);
+            double d_errorCost_2_d_laguerre_param =
+              d_laguerreFunction_d_param(laguerre_param, b) +
+              d_laguerreFunction_d_x(laguerre_param, b) / ratio_expB_over_expA * -d_laguerreFunction_d_param(-laguerre_param, _colorB);
 
             jacobians[0][0] = d_errorCost_1_d_laguerre_param;
             jacobians[0][1] = d_errorCost_2_d_laguerre_param;
         }
 
-        if(jacobians[1] != nullptr)
+        if (jacobians[1] != nullptr)
         {
             jacobians[1][0] = d_laguerreFunction_d_x(laguerre_param, a) * laguerreFunctionInv(laguerre_param, _colorA);
             jacobians[1][1] = d_laguerreFunction_d_x(laguerre_param, b) * laguerreFunctionInv(laguerre_param, _colorB) *
@@ -121,18 +117,17 @@ public:
         return true;
     }
 
-private:
+  private:
     double _colorA;
     double _colorB;
 };
 
 class ExposureConstraint : public ceres::SizedCostFunction<1, 1>
 {
-public:
+  public:
     explicit ExposureConstraint(double ratio)
-        : _ratio(ratio)
-    {
-    }
+      : _ratio(ratio)
+    {}
 
     bool Evaluate(double const* const* parameters, double* residuals, double** jacobians) const override
     {
@@ -141,12 +136,12 @@ public:
         const double w = 1.0;
         residuals[0] = w * (ratio_cur - _ratio);
 
-        if(jacobians == nullptr)
+        if (jacobians == nullptr)
         {
             return true;
         }
 
-        if(jacobians[0] != nullptr)
+        if (jacobians[0] != nullptr)
         {
             jacobians[0][0] = w;
         }
@@ -154,25 +149,26 @@ public:
         return true;
     }
 
-private:
+  private:
     double _ratio;
 };
 
 void LaguerreBACalibration::process(const std::vector<std::vector<ImageSample>>& ldrSamples,
-                                    std::vector<std::vector<float>>& cameraExposures,
-                                    const std::size_t channelQuantization,
-                                    bool refineExposures, rgbCurve& response)
+                                    std::vector<std::vector<double>>& cameraExposures,
+                                    [[maybe_unused]] const std::size_t channelQuantization,
+                                    bool refineExposures,
+                                    rgbCurve& response)
 {
-    std::map<std::pair<float, float>, double> exposureParameters;
-    for(std::vector<float>& group : cameraExposures)
+    std::map<std::pair<double, double>, double> exposureParameters;
+    for (std::vector<double>& group : cameraExposures)
     {
-        for(int index = 0; index < group.size() - 1; index++)
+        for (int index = 0; index < static_cast<int>(group.size()) - 1; index++)
         {
-            std::pair<float, float> exposurePair;
+            std::pair<double, double> exposurePair;
             exposurePair.first = group[index];
             exposurePair.second = group[index + 1];
-            exposureParameters[exposurePair] = double(exposurePair.second) / double(exposurePair.first);
-        } 
+            exposureParameters[exposurePair] = exposurePair.second / exposurePair.first;
+        }
     }
 
     std::array<double, 3> laguerreParam = {0.0, 0.0, 0.0};
@@ -180,38 +176,41 @@ void LaguerreBACalibration::process(const std::vector<std::vector<ImageSample>>&
     ceres::Problem problem;
     ceres::LossFunction* lossFunction = nullptr;
 
-    for(auto& param : exposureParameters) {
+    for (auto& param : exposureParameters)
+    {
         problem.AddParameterBlock(&param.second, 1);
     }
 
     // Convert selected samples into residual blocks
-    for(int groupId = 0; groupId < ldrSamples.size(); ++groupId)
+    for (int groupId = 0; groupId < static_cast<int>(ldrSamples.size()); ++groupId)
     {
-        const std::vector<ImageSample> & group = ldrSamples[groupId];
+        const std::vector<ImageSample>& group = ldrSamples[groupId];
 
-        for (int sampleId = 0; sampleId < group.size(); sampleId++) {
+        for (int sampleId = 0; sampleId < static_cast<int>(group.size()); sampleId++)
+        {
+            const ImageSample& sample = group[sampleId];
 
-            const ImageSample & sample = group[sampleId];
-
-            for (int bracketPos = 0; bracketPos < sample.descriptions.size() - 1; bracketPos++) {
-                
-                std::pair<float, float> exposurePair;
+            for (int bracketPos = 0; bracketPos < static_cast<int>(sample.descriptions.size()) - 1; bracketPos++)
+            {
+                std::pair<double, double> exposurePair;
                 exposurePair.first = sample.descriptions[bracketPos].exposure;
                 exposurePair.second = sample.descriptions[bracketPos + 1].exposure;
 
-                double * expParam = &exposureParameters[exposurePair];
+                double* expParam = &exposureParameters[exposurePair];
 
-                for (int channel = 0; channel < 3; channel++) {
-                    ceres::CostFunction * cost = new HdrResidualAnalytic(sample.descriptions[bracketPos].mean(channel), sample.descriptions[bracketPos + 1].mean(channel));
+                for (int channel = 0; channel < 3; channel++)
+                {
+                    ceres::CostFunction* cost =
+                      new HdrResidualAnalytic(sample.descriptions[bracketPos].mean(channel), sample.descriptions[bracketPos + 1].mean(channel));
                     problem.AddResidualBlock(cost, lossFunction, &(laguerreParam.data()[channel]), expParam);
                 }
             }
         }
     }
 
-    if(!refineExposures)
+    if (!refineExposures)
     {
-        for(auto& param : exposureParameters)
+        for (auto& param : exposureParameters)
         {
             problem.AddParameterBlock(&param.second, 1);
             problem.SetParameterBlockConstant(&param.second);
@@ -219,7 +218,7 @@ void LaguerreBACalibration::process(const std::vector<std::vector<ImageSample>>&
     }
     else
     {
-        for(auto& param : exposureParameters)
+        for (auto& param : exposureParameters)
         {
             problem.AddResidualBlock(new ExposureConstraint(param.second), nullptr, &param.second);
         }
@@ -240,35 +239,35 @@ void LaguerreBACalibration::process(const std::vector<std::vector<ImageSample>>&
     ceres::Solver::Summary summary;
     ceres::Solve(solverOptions, &problem, &summary);
 
-    std::cout << summary.FullReport() << std::endl;
+    ALICEVISION_LOG_DEBUG(summary.FullReport());
 
     for (unsigned int channel = 0; channel < 3; ++channel)
     {
         std::vector<float>& curve = response.getCurve(channel);
         const double step = 1.0 / double(curve.size());
 
-        std::cout << laguerreParam[channel] << std::endl;
-        for(unsigned int i = 0; i < curve.size(); ++i)
+        ALICEVISION_LOG_DEBUG("Laguerre parameter[" << channel << "]: " << laguerreParam[channel]);
+        for (unsigned int i = 0; i < curve.size(); ++i)
         {
             curve[i] = laguerreFunctionInv(laguerreParam[channel], i * step);
         }
     }
 
-    if(refineExposures)
+    if (refineExposures)
     {
-        for(size_t idGroup = 0; idGroup < cameraExposures.size(); idGroup++) 
-        {   
-            std::vector<float> & group = cameraExposures[idGroup];
-            
-            //Copy !
-            std::vector<float> res = cameraExposures[idGroup];
-        
-            for(int index = 0; index < group.size() - 1; index++)
+        for (size_t idGroup = 0; idGroup < cameraExposures.size(); idGroup++)
+        {
+            std::vector<double>& group = cameraExposures[idGroup];
+
+            // Copy !
+            std::vector<double> res = cameraExposures[idGroup];
+
+            for (int index = 0; index < static_cast<int>(group.size()) - 1; index++)
             {
-                std::pair<float, float> exposurePair;
+                std::pair<double, double> exposurePair;
                 exposurePair.first = group[index];
                 exposurePair.second = group[index + 1];
-                double value = exposureParameters[exposurePair];
+                const double value = exposureParameters[exposurePair];
                 res[index + 1] = (res[res.size() - 1] * value);
             }
 
@@ -277,5 +276,5 @@ void LaguerreBACalibration::process(const std::vector<std::vector<ImageSample>>&
     }
 }
 
-} // namespace hdr
-} // namespace aliceVision
+}  // namespace hdr
+}  // namespace aliceVision

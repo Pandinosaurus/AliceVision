@@ -6,8 +6,11 @@
 
 #pragma once
 
-#include <aliceVision/image/all.hpp>
+#include <aliceVision/types.hpp>
+#include <aliceVision/image/Image.hpp>
+#include <aliceVision/image/io.hpp>
 #include <aliceVision/numeric/numeric.hpp>
+#include <random>
 #include <set>
 
 namespace aliceVision {
@@ -19,11 +22,12 @@ struct UniqueDescriptor
     int channel;
     int quantizedValue;
 
-    bool operator<(const UniqueDescriptor &o) const;
+    bool operator<(const UniqueDescriptor& o) const;
 };
 
 struct PixelDescription
 {
+    aliceVision::IndexT srcId = 0;
     float exposure;
     image::Rgb<float> mean;
     image::Rgb<float> variance;
@@ -38,15 +42,14 @@ struct ImageSample
     ImageSample() = default;
 };
 
-std::ostream & operator<<(std::ostream& os, const ImageSample & s);
-std::ostream & operator<<(std::ostream& os, const PixelDescription & p);
-std::istream & operator>>(std::istream& os, ImageSample & s);
-std::istream & operator>>(std::istream& os, PixelDescription & p);
-
+std::ostream& operator<<(std::ostream& os, const ImageSample& s);
+std::ostream& operator<<(std::ostream& os, const PixelDescription& p);
+std::istream& operator>>(std::istream& os, ImageSample& s);
+std::istream& operator>>(std::istream& os, PixelDescription& p);
 
 class Sampling
 {
-public:
+  public:
     struct Coordinates
     {
         unsigned int imageIndex;
@@ -57,20 +60,33 @@ public:
         int blockSize = 256;
         int radius = 5;
         size_t maxCountSample = 200;
+        std::mt19937::result_type randomSeed = std::mt19937::default_seed;
     };
 
     using MapSampleRefList = std::map<UniqueDescriptor, std::vector<Coordinates>>;
 
-public:
-    void analyzeSource(std::vector<ImageSample> & samples, int channelQuantization, int imageIndex);
-    void filter(size_t maxTotalPoints);
-    void extractUsefulSamples(std::vector<ImageSample> & out_samples, const std::vector<ImageSample> & samples, int imageIndex) const;
-    
-    static bool extractSamplesFromImages(std::vector<ImageSample>& out_samples, const std::vector<std::string> & imagePaths, const std::vector<float>& times, const size_t imageWidth, const size_t imageHeight, const size_t channelQuantization, const image::EImageColorSpace & colorspace, bool applyWhiteBalance, const Params params);
+  public:
+    void setRandomSeed(std::mt19937::result_type seed) { _randomSeed = seed; }
 
-private:
+    void analyzeSource(std::vector<ImageSample>& samples, int channelQuantization, int imageIndex);
+    void filter(size_t maxTotalPoints);
+    void extractUsefulSamples(std::vector<ImageSample>& out_samples, const std::vector<ImageSample>& samples, int imageIndex) const;
+
+    static bool extractSamplesFromImages(std::vector<ImageSample>& out_samples,
+                                         const std::vector<std::string>& imagePaths,
+                                         const std::vector<IndexT>& viewIds,
+                                         const std::vector<double>& times,
+                                         const size_t imageWidth,
+                                         const size_t imageHeight,
+                                         const size_t channelQuantization,
+                                         const image::ImageReadOptions& imgReadOptions,
+                                         const Params params,
+                                         const bool simplified = false);
+
+  private:
     MapSampleRefList _positions;
+    std::mt19937::result_type _randomSeed = std::mt19937::default_seed;
 };
 
-} // namespace hdr
-} // namespace aliceVision
+}  // namespace hdr
+}  // namespace aliceVision
